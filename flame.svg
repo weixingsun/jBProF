@@ -1,0 +1,1012 @@
+<?xml version="1.0" standalone="no"?>
+<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
+<svg version="1.1" width="1200" height="358" onload="init(evt)" viewBox="0 0 1200 358" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+<!-- Flame graph stack visualization. See https://github.com/brendangregg/FlameGraph for latest version, and http://www.brendangregg.com/flamegraphs.html for examples. -->
+<!-- NOTES:  -->
+<defs>
+	<linearGradient id="background" y1="0" y2="1" x1="0" x2="0" >
+		<stop stop-color="#eeeeee" offset="5%" />
+		<stop stop-color="#eeeeb0" offset="95%" />
+	</linearGradient>
+</defs>
+<style type="text/css">
+	text { font-family:Verdana; font-size:12px; fill:rgb(0,0,0); }
+	#search, #ignorecase { opacity:0.1; cursor:pointer; }
+	#search:hover, #search.show, #ignorecase:hover, #ignorecase.show { opacity:1; }
+	#subtitle { text-anchor:middle; font-color:rgb(160,160,160); }
+	#title { text-anchor:middle; font-size:17px}
+	#unzoom { cursor:pointer; }
+	#frames > *:hover { stroke:black; stroke-width:0.5; cursor:pointer; }
+	.hide { display:none; }
+	.parent { opacity:0.5; }
+</style>
+<script type="text/ecmascript">
+<![CDATA[
+	"use strict";
+	var details, searchbtn, unzoombtn, matchedtxt, svg, searching, currentSearchTerm, ignorecase, ignorecaseBtn;
+	function init(evt) {
+		details = document.getElementById("details").firstChild;
+		searchbtn = document.getElementById("search");
+		ignorecaseBtn = document.getElementById("ignorecase");
+		unzoombtn = document.getElementById("unzoom");
+		matchedtxt = document.getElementById("matched");
+		svg = document.getElementsByTagName("svg")[0];
+		searching = 0;
+		currentSearchTerm = null;
+	}
+
+	window.addEventListener("click", function(e) {
+		var target = find_group(e.target);
+		if (target) {
+			if (target.nodeName == "a") {
+				if (e.ctrlKey === false) return;
+				e.preventDefault();
+			}
+			if (target.classList.contains("parent")) unzoom();
+			zoom(target);
+		}
+		else if (e.target.id == "unzoom") unzoom();
+		else if (e.target.id == "search") search_prompt();
+		else if (e.target.id == "ignorecase") toggle_ignorecase();
+	}, false)
+
+	// mouse-over for info
+	// show
+	window.addEventListener("mouseover", function(e) {
+		var target = find_group(e.target);
+		if (target) details.nodeValue = "Function: " + g_to_text(target);
+	}, false)
+
+	// clear
+	window.addEventListener("mouseout", function(e) {
+		var target = find_group(e.target);
+		if (target) details.nodeValue = ' ';
+	}, false)
+
+	// ctrl-F for search
+	window.addEventListener("keydown",function (e) {
+		if (e.keyCode === 114 || (e.ctrlKey && e.keyCode === 70)) {
+			e.preventDefault();
+			search_prompt();
+		}
+	}, false)
+
+	// ctrl-I to toggle case-sensitive search
+	window.addEventListener("keydown",function (e) {
+		if (e.ctrlKey && e.keyCode === 73) {
+			e.preventDefault();
+			toggle_ignorecase();
+		}
+	}, false)
+
+	// functions
+	function find_child(node, selector) {
+		var children = node.querySelectorAll(selector);
+		if (children.length) return children[0];
+		return;
+	}
+	function find_group(node) {
+		var parent = node.parentElement;
+		if (!parent) return;
+		if (parent.id == "frames") return node;
+		return find_group(parent);
+	}
+	function orig_save(e, attr, val) {
+		if (e.attributes["_orig_" + attr] != undefined) return;
+		if (e.attributes[attr] == undefined) return;
+		if (val == undefined) val = e.attributes[attr].value;
+		e.setAttribute("_orig_" + attr, val);
+	}
+	function orig_load(e, attr) {
+		if (e.attributes["_orig_"+attr] == undefined) return;
+		e.attributes[attr].value = e.attributes["_orig_" + attr].value;
+		e.removeAttribute("_orig_"+attr);
+	}
+	function g_to_text(e) {
+		var text = find_child(e, "title").firstChild.nodeValue;
+		return (text)
+	}
+	function g_to_func(e) {
+		var func = g_to_text(e);
+		// if there's any manipulation we want to do to the function
+		// name before it's searched, do it here before returning.
+		return (func);
+	}
+	function update_text(e) {
+		var r = find_child(e, "rect");
+		var t = find_child(e, "text");
+		var w = parseFloat(r.attributes.width.value) -3;
+		var txt = find_child(e, "title").textContent.replace(/\([^(]*\)$/,"");
+		t.attributes.x.value = parseFloat(r.attributes.x.value) + 3;
+
+		// Smaller than this size won't fit anything
+		if (w < 2 * 12 * 0.59) {
+			t.textContent = "";
+			return;
+		}
+
+		t.textContent = txt;
+		// Fit in full text width
+		if (/^ *$/.test(txt) || t.getSubStringLength(0, txt.length) < w)
+			return;
+
+		for (var x = txt.length - 2; x > 0; x--) {
+			if (t.getSubStringLength(0, x + 2) <= w) {
+				t.textContent = txt.substring(0, x) + "..";
+				return;
+			}
+		}
+		t.textContent = "";
+	}
+
+	// zoom
+	function zoom_reset(e) {
+		if (e.attributes != undefined) {
+			orig_load(e, "x");
+			orig_load(e, "width");
+		}
+		if (e.childNodes == undefined) return;
+		for (var i = 0, c = e.childNodes; i < c.length; i++) {
+			zoom_reset(c[i]);
+		}
+	}
+	function zoom_child(e, x, ratio) {
+		if (e.attributes != undefined) {
+			if (e.attributes.x != undefined) {
+				orig_save(e, "x");
+				e.attributes.x.value = (parseFloat(e.attributes.x.value) - x - 10) * ratio + 10;
+				if (e.tagName == "text")
+					e.attributes.x.value = find_child(e.parentNode, "rect[x]").attributes.x.value + 3;
+			}
+			if (e.attributes.width != undefined) {
+				orig_save(e, "width");
+				e.attributes.width.value = parseFloat(e.attributes.width.value) * ratio;
+			}
+		}
+
+		if (e.childNodes == undefined) return;
+		for (var i = 0, c = e.childNodes; i < c.length; i++) {
+			zoom_child(c[i], x - 10, ratio);
+		}
+	}
+	function zoom_parent(e) {
+		if (e.attributes) {
+			if (e.attributes.x != undefined) {
+				orig_save(e, "x");
+				e.attributes.x.value = 10;
+			}
+			if (e.attributes.width != undefined) {
+				orig_save(e, "width");
+				e.attributes.width.value = parseInt(svg.width.baseVal.value) - (10 * 2);
+			}
+		}
+		if (e.childNodes == undefined) return;
+		for (var i = 0, c = e.childNodes; i < c.length; i++) {
+			zoom_parent(c[i]);
+		}
+	}
+	function zoom(node) {
+		var attr = find_child(node, "rect").attributes;
+		var width = parseFloat(attr.width.value);
+		var xmin = parseFloat(attr.x.value);
+		var xmax = parseFloat(xmin + width);
+		var ymin = parseFloat(attr.y.value);
+		var ratio = (svg.width.baseVal.value - 2 * 10) / width;
+
+		// XXX: Workaround for JavaScript float issues (fix me)
+		var fudge = 0.0001;
+
+		unzoombtn.classList.remove("hide");
+
+		var el = document.getElementById("frames").children;
+		for (var i = 0; i < el.length; i++) {
+			var e = el[i];
+			var a = find_child(e, "rect").attributes;
+			var ex = parseFloat(a.x.value);
+			var ew = parseFloat(a.width.value);
+			var upstack;
+			// Is it an ancestor
+			if (0 == 0) {
+				upstack = parseFloat(a.y.value) > ymin;
+			} else {
+				upstack = parseFloat(a.y.value) < ymin;
+			}
+			if (upstack) {
+				// Direct ancestor
+				if (ex <= xmin && (ex+ew+fudge) >= xmax) {
+					e.classList.add("parent");
+					zoom_parent(e);
+					update_text(e);
+				}
+				// not in current path
+				else
+					e.classList.add("hide");
+			}
+			// Children maybe
+			else {
+				// no common path
+				if (ex < xmin || ex + fudge >= xmax) {
+					e.classList.add("hide");
+				}
+				else {
+					zoom_child(e, xmin, ratio);
+					update_text(e);
+				}
+			}
+		}
+		search();
+	}
+	function unzoom() {
+		unzoombtn.classList.add("hide");
+		var el = document.getElementById("frames").children;
+		for(var i = 0; i < el.length; i++) {
+			el[i].classList.remove("parent");
+			el[i].classList.remove("hide");
+			zoom_reset(el[i]);
+			update_text(el[i]);
+		}
+		search();
+	}
+
+	// search
+	function toggle_ignorecase() {
+		ignorecase = !ignorecase;
+		if (ignorecase) {
+			ignorecaseBtn.classList.add("show");
+		} else {
+			ignorecaseBtn.classList.remove("show");
+		}
+		reset_search();
+		search();
+	}
+	function reset_search() {
+		var el = document.querySelectorAll("#frames rect");
+		for (var i = 0; i < el.length; i++) {
+			orig_load(el[i], "fill")
+		}
+	}
+	function search_prompt() {
+		if (!searching) {
+			var term = prompt("Enter a search term (regexp " +
+			    "allowed, eg: ^ext4_)"
+			    + (ignorecase ? ", ignoring case" : "")
+			    + "\nPress Ctrl-i to toggle case sensitivity", "");
+			if (term != null) {
+				currentSearchTerm = term;
+				search();
+			}
+		} else {
+			reset_search();
+			searching = 0;
+			currentSearchTerm = null;
+			searchbtn.classList.remove("show");
+			searchbtn.firstChild.nodeValue = "Search"
+			matchedtxt.classList.add("hide");
+			matchedtxt.firstChild.nodeValue = ""
+		}
+	}
+	function search(term) {
+		if (currentSearchTerm === null) return;
+		var term = currentSearchTerm;
+
+		var re = new RegExp(term, ignorecase ? 'i' : '');
+		var el = document.getElementById("frames").children;
+		var matches = new Object();
+		var maxwidth = 0;
+		for (var i = 0; i < el.length; i++) {
+			var e = el[i];
+			var func = g_to_func(e);
+			var rect = find_child(e, "rect");
+			if (func == null || rect == null)
+				continue;
+
+			// Save max width. Only works as we have a root frame
+			var w = parseFloat(rect.attributes.width.value);
+			if (w > maxwidth)
+				maxwidth = w;
+
+			if (func.match(re)) {
+				// highlight
+				var x = parseFloat(rect.attributes.x.value);
+				orig_save(rect, "fill");
+				rect.attributes.fill.value = "rgb(230,0,230)";
+
+				// remember matches
+				if (matches[x] == undefined) {
+					matches[x] = w;
+				} else {
+					if (w > matches[x]) {
+						// overwrite with parent
+						matches[x] = w;
+					}
+				}
+				searching = 1;
+			}
+		}
+		if (!searching)
+			return;
+
+		searchbtn.classList.add("show");
+		searchbtn.firstChild.nodeValue = "Reset Search";
+
+		// calculate percent matched, excluding vertical overlap
+		var count = 0;
+		var lastx = -1;
+		var lastw = 0;
+		var keys = Array();
+		for (k in matches) {
+			if (matches.hasOwnProperty(k))
+				keys.push(k);
+		}
+		// sort the matched frames by their x location
+		// ascending, then width descending
+		keys.sort(function(a, b){
+			return a - b;
+		});
+		// Step through frames saving only the biggest bottom-up frames
+		// thanks to the sort order. This relies on the tree property
+		// where children are always smaller than their parents.
+		var fudge = 0.0001;	// JavaScript floating point
+		for (var k in keys) {
+			var x = parseFloat(keys[k]);
+			var w = matches[keys[k]];
+			if (x >= lastx + lastw - fudge) {
+				count += w;
+				lastx = x;
+				lastw = w;
+			}
+		}
+		// display matched percent
+		matchedtxt.classList.remove("hide");
+		var pct = 100 * count / maxwidth;
+		if (pct != 100) pct = pct.toFixed(1)
+		matchedtxt.firstChild.nodeValue = "Matched: " + pct + "%";
+	}
+]]>
+</script>
+<rect x="0.0" y="0" width="1200.0" height="358.0" fill="url(#background)"  />
+<text id="title" x="600.00" y="24" >Flame Graph</text>
+<text id="details" x="10.00" y="341" > </text>
+<text id="unzoom" x="10.00" y="24" class="hide">Reset Zoom</text>
+<text id="search" x="1090.00" y="24" >Search</text>
+<text id="ignorecase" x="1174.00" y="24" >ic</text>
+<text id="matched" x="1090.00" y="341" > </text>
+<g id="frames">
+<g >
+<title>irq_exit (2 samples, 0.10%)</title><rect x="914.8" y="133" width="1.2" height="15.0" fill="rgb(223,119,43)" rx="2" ry="2" />
+<text  x="917.77" y="143.5" ></text>
+</g>
+<g >
+<title>void OopOopIterateDispatch&lt;PCAdjustPointerClosure&gt;::Table::oop_oop_iterate&lt;InstanceKlass, unsigned int&gt;(PCAdjustPointerClosure*, oopDesc*, Klass*) (44 samples, 2.25%)</title><rect x="191.7" y="165" width="26.5" height="15.0" fill="rgb(208,71,16)" rx="2" ry="2" />
+<text  x="194.68" y="175.5" >v..</text>
+</g>
+<g >
+<title>ParallelCompactData::calc_new_pointer(HeapWordImpl**, ParCompactionManager*)      (13 samples, 0.66%)</title><rect x="121.1" y="165" width="7.8" height="15.0" fill="rgb(237,15,51)" rx="2" ry="2" />
+<text  x="124.06" y="175.5" ></text>
+</g>
+<g >
+<title>ParCompactionManager::follow_contents(oopDesc*)      (2 samples, 0.10%)</title><rect x="45.6" y="181" width="1.2" height="15.0" fill="rgb(232,200,12)" rx="2" ry="2" />
+<text  x="48.61" y="191.5" ></text>
+</g>
+<g >
+<title>ParallelCompactData::calc_new_pointer(HeapWordImpl**, ParCompactionManager*) (9 samples, 0.46%)</title><rect x="37.2" y="117" width="5.4" height="15.0" fill="rgb(213,186,35)" rx="2" ry="2" />
+<text  x="40.16" y="127.5" ></text>
+</g>
+<g >
+<title>__softirqentry_text_start (1 samples, 0.05%)</title><rect x="914.2" y="101" width="0.6" height="15.0" fill="rgb(209,153,37)" rx="2" ry="2" />
+<text  x="917.16" y="111.5" ></text>
+</g>
+<g >
+<title>call_stub (7 samples, 0.36%)</title><rect x="1185.8" y="181" width="4.2" height="15.0" fill="rgb(217,182,8)" rx="2" ry="2" />
+<text  x="1188.77" y="191.5" ></text>
+</g>
+<g >
+<title>cursor_timer_handler      (1 samples, 0.05%)</title><rect x="914.2" y="69" width="0.6" height="15.0" fill="rgb(244,79,16)" rx="2" ry="2" />
+<text  x="917.16" y="79.5" ></text>
+</g>
+<g >
+<title>ParMarkBitMap::live_words_in_range(ParCompactionManager*, HeapWordImpl**, oopDesc*) const      (5 samples, 0.26%)</title><rect x="37.2" y="101" width="3.0" height="15.0" fill="rgb(240,220,8)" rx="2" ry="2" />
+<text  x="40.16" y="111.5" ></text>
+</g>
+<g >
+<title>thread_native_entry(Thread*) (1,932 samples, 98.82%)</title><rect x="17.8" y="261" width="1166.2" height="15.0" fill="rgb(236,54,50)" rx="2" ry="2" />
+<text  x="20.85" y="271.5" >thread_native_entry(Thread*)</text>
+</g>
+<g >
+<title>ParMarkBitMap::iterate(ParMarkBitMapClosure*, ParMarkBitMapClosure*, unsigned long, unsigned long, unsigned long) const      (97 samples, 4.96%)</title><rect x="48.6" y="197" width="58.6" height="15.0" fill="rgb(228,25,25)" rx="2" ry="2" />
+<text  x="51.63" y="207.5" >ParMar..</text>
+</g>
+<g >
+<title>ParGC Thread#0 (1,938 samples, 99.13%)</title><rect x="14.2" y="293" width="1169.8" height="15.0" fill="rgb(206,128,17)" rx="2" ry="2" />
+<text  x="17.23" y="303.5" >ParGC Thread#0</text>
+</g>
+<g >
+<title>rtTimerLinuxStdCallback (1 samples, 0.05%)</title><rect x="915.4" y="69" width="0.6" height="15.0" fill="rgb(253,71,40)" rx="2" ry="2" />
+<text  x="918.37" y="79.5" ></text>
+</g>
+<g >
+<title>irq_exit (5 samples, 0.26%)</title><rect x="1065.1" y="149" width="3.0" height="15.0" fill="rgb(211,227,1)" rx="2" ry="2" />
+<text  x="1068.06" y="159.5" ></text>
+</g>
+<g >
+<title>ThreadJavaMain (7 samples, 0.36%)</title><rect x="1185.8" y="261" width="4.2" height="15.0" fill="rgb(254,61,33)" rx="2" ry="2" />
+<text  x="1188.77" y="271.5" ></text>
+</g>
+<g >
+<title>Klass::start_of_vtable() const      (6 samples, 0.31%)</title><rect x="117.4" y="165" width="3.7" height="15.0" fill="rgb(215,229,31)" rx="2" ry="2" />
+<text  x="120.44" y="175.5" ></text>
+</g>
+<g >
+<title>[UNKNOWN] (2 samples, 0.10%)</title><rect x="10.6" y="245" width="1.2" height="15.0" fill="rgb(216,146,38)" rx="2" ry="2" />
+<text  x="13.60" y="255.5" ></text>
+</g>
+<g >
+<title>irq_exit (2 samples, 0.10%)</title><rect x="821.2" y="117" width="1.2" height="15.0" fill="rgb(212,42,54)" rx="2" ry="2" />
+<text  x="824.21" y="127.5" ></text>
+</g>
+<g >
+<title>ParMarkBitMap::mark_obj(HeapWordImpl**, unsigned long)      (1 samples, 0.05%)</title><rect x="46.8" y="165" width="0.6" height="15.0" fill="rgb(227,213,50)" rx="2" ry="2" />
+<text  x="49.82" y="175.5" ></text>
+</g>
+<g >
+<title>VbglR0GRPerform      (1 samples, 0.05%)</title><rect x="915.4" y="37" width="0.6" height="15.0" fill="rgb(239,55,13)" rx="2" ry="2" />
+<text  x="918.37" y="47.5" ></text>
+</g>
+<g >
+<title>ParMarkBitMap::live_words_in_range_helper(HeapWordImpl**, oopDesc*) const      (8 samples, 0.41%)</title><rect x="285.2" y="149" width="4.9" height="15.0" fill="rgb(221,165,18)" rx="2" ry="2" />
+<text  x="288.23" y="159.5" ></text>
+</g>
+<g >
+<title>irq_exit (1 samples, 0.05%)</title><rect x="11.2" y="181" width="0.6" height="15.0" fill="rgb(253,50,8)" rx="2" ry="2" />
+<text  x="14.21" y="191.5" ></text>
+</g>
+<g >
+<title>apic_timer_interrupt (2 samples, 0.10%)</title><rect x="232.1" y="165" width="1.2" height="15.0" fill="rgb(205,88,20)" rx="2" ry="2" />
+<text  x="235.12" y="175.5" ></text>
+</g>
+<g >
+<title>PSParallelCompact::fill_region(ParCompactionManager*, unsigned long) (46 samples, 2.35%)</title><rect x="17.8" y="181" width="27.8" height="15.0" fill="rgb(248,8,11)" rx="2" ry="2" />
+<text  x="20.85" y="191.5" >P..</text>
+</g>
+<g >
+<title>void OopOopIterateDispatch&lt;PCAdjustPointerClosure&gt;::Table::oop_oop_iterate&lt;InstanceKlass, unsigned int&gt;(PCAdjustPointerClosure*, oopDesc*, Klass*)      (6 samples, 0.31%)</title><rect x="27.5" y="133" width="3.6" height="15.0" fill="rgb(211,125,13)" rx="2" ry="2" />
+<text  x="30.50" y="143.5" ></text>
+</g>
+<g >
+<title>sys_futex (1 samples, 0.05%)</title><rect x="1185.2" y="229" width="0.6" height="15.0" fill="rgb(236,78,17)" rx="2" ry="2" />
+<text  x="1188.17" y="239.5" ></text>
+</g>
+<g >
+<title>smp_apic_timer_interrupt (5 samples, 0.26%)</title><rect x="218.2" y="165" width="3.1" height="15.0" fill="rgb(227,160,19)" rx="2" ry="2" />
+<text  x="221.24" y="175.5" ></text>
+</g>
+<g >
+<title>ParMarkBitMap::live_words_in_range_helper(HeapWordImpl**, oopDesc*) const      (4 samples, 0.20%)</title><rect x="40.2" y="85" width="2.4" height="15.0" fill="rgb(237,33,28)" rx="2" ry="2" />
+<text  x="43.18" y="95.5" ></text>
+</g>
+<g >
+<title>smp_apic_timer_interrupt (5 samples, 0.26%)</title><rect x="1065.1" y="165" width="3.0" height="15.0" fill="rgb(208,127,35)" rx="2" ry="2" />
+<text  x="1068.06" y="175.5" ></text>
+</g>
+<g >
+<title>_copy_from_user      (1 samples, 0.05%)</title><rect x="1184.6" y="229" width="0.6" height="15.0" fill="rgb(227,72,39)" rx="2" ry="2" />
+<text  x="1187.57" y="239.5" ></text>
+</g>
+<g >
+<title>swapgs_restore_regs_and_return_to_usermode (4 samples, 0.20%)</title><rect x="221.3" y="181" width="2.4" height="15.0" fill="rgb(233,57,3)" rx="2" ry="2" />
+<text  x="224.25" y="191.5" ></text>
+</g>
+<g >
+<title>apic_timer_interrupt (2 samples, 0.10%)</title><rect x="914.8" y="165" width="1.2" height="15.0" fill="rgb(206,10,50)" rx="2" ry="2" />
+<text  x="917.77" y="175.5" ></text>
+</g>
+<g >
+<title>Thread::call_run() (1,932 samples, 98.82%)</title><rect x="17.8" y="245" width="1166.2" height="15.0" fill="rgb(217,130,24)" rx="2" ry="2" />
+<text  x="20.85" y="255.5" >Thread::call_run()</text>
+</g>
+<g >
+<title>ParallelCompactData::calc_new_pointer(HeapWordImpl**, ParCompactionManager*)      (10 samples, 0.51%)</title><rect x="31.1" y="117" width="6.1" height="15.0" fill="rgb(223,11,0)" rx="2" ry="2" />
+<text  x="34.13" y="127.5" ></text>
+</g>
+<g >
+<title>ParCompactionManager::follow_contents(oopDesc*)      (90 samples, 4.60%)</title><rect x="502.5" y="181" width="54.3" height="15.0" fill="rgb(228,128,34)" rx="2" ry="2" />
+<text  x="505.52" y="191.5" >ParCo..</text>
+</g>
+<g >
+<title>void OopOopIterateDispatch&lt;PCAdjustPointerClosure&gt;::Table::oop_oop_iterate&lt;InstanceKlass, unsigned int&gt;(PCAdjustPointerClosure*, oopDesc*, Klass*)      (104 samples, 5.32%)</title><rect x="128.9" y="165" width="62.8" height="15.0" fill="rgb(229,39,22)" rx="2" ry="2" />
+<text  x="131.91" y="175.5" >void O..</text>
+</g>
+<g >
+<title>__do_page_fault      (1 samples, 0.05%)</title><rect x="45.0" y="101" width="0.6" height="15.0" fill="rgb(226,215,37)" rx="2" ry="2" />
+<text  x="48.01" y="111.5" ></text>
+</g>
+<g >
+<title>ParallelCompactData::calc_new_pointer(HeapWordImpl**, ParCompactionManager*)      (23 samples, 1.18%)</title><rect x="269.5" y="181" width="13.9" height="15.0" fill="rgb(252,124,23)" rx="2" ry="2" />
+<text  x="272.54" y="191.5" ></text>
+</g>
+<g >
+<title>MarkFromRootsTask::do_it(GCTaskManager*, unsigned int) (5 samples, 0.26%)</title><rect x="45.6" y="213" width="3.0" height="15.0" fill="rgb(225,129,54)" rx="2" ry="2" />
+<text  x="48.61" y="223.5" ></text>
+</g>
+<g >
+<title>__softirqentry_text_start (1 samples, 0.05%)</title><rect x="915.4" y="117" width="0.6" height="15.0" fill="rgb(205,30,11)" rx="2" ry="2" />
+<text  x="918.37" y="127.5" ></text>
+</g>
+<g >
+<title>void OopOopIterateDispatch&lt;PCIterateMarkAndPushClosure&gt;::Table::oop_oop_iterate&lt;InstanceKlass, unsigned int&gt;(PCIterateMarkAndPushClosure*, oopDesc*, Klass*)      (8 samples, 0.41%)</title><rect x="1068.1" y="181" width="4.8" height="15.0" fill="rgb(209,58,12)" rx="2" ry="2" />
+<text  x="1071.08" y="191.5" ></text>
+</g>
+<g >
+<title>ret_from_intr (1 samples, 0.05%)</title><rect x="233.3" y="165" width="0.6" height="15.0" fill="rgb(208,66,3)" rx="2" ry="2" />
+<text  x="236.32" y="175.5" ></text>
+</g>
+<g >
+<title>__softirqentry_text_start      (5 samples, 0.26%)</title><rect x="218.2" y="133" width="3.1" height="15.0" fill="rgb(239,130,9)" rx="2" ry="2" />
+<text  x="221.24" y="143.5" ></text>
+</g>
+<g >
+<title>smp_apic_timer_interrupt (2 samples, 0.10%)</title><rect x="914.8" y="149" width="1.2" height="15.0" fill="rgb(228,55,19)" rx="2" ry="2" />
+<text  x="917.77" y="159.5" ></text>
+</g>
+<g >
+<title>smp_apic_timer_interrupt (2 samples, 0.10%)</title><rect x="821.2" y="133" width="1.2" height="15.0" fill="rgb(205,169,21)" rx="2" ry="2" />
+<text  x="824.21" y="143.5" ></text>
+</g>
+<g >
+<title>ParMarkBitMap::live_words_in_range(ParCompactionManager*, HeapWordImpl**, oopDesc*) const (8 samples, 0.41%)</title><rect x="285.2" y="165" width="4.9" height="15.0" fill="rgb(226,205,2)" rx="2" ry="2" />
+<text  x="288.23" y="175.5" ></text>
+</g>
+<g >
+<title>ThreadRootsMarkingTask::do_it(GCTaskManager*, unsigned int) (1,481 samples, 75.75%)</title><rect x="290.1" y="213" width="893.9" height="15.0" fill="rgb(252,222,33)" rx="2" ry="2" />
+<text  x="293.06" y="223.5" >ThreadRootsMarkingTask::do_it(GCTaskManager*, unsigned int)</text>
+</g>
+<g >
+<title>UpdateOnlyClosure::do_addr(HeapWordImpl**, unsigned long)      (51 samples, 2.61%)</title><rect x="233.9" y="197" width="30.8" height="15.0" fill="rgb(251,187,9)" rx="2" ry="2" />
+<text  x="236.93" y="207.5" >Up..</text>
+</g>
+<g >
+<title>apic_timer_interrupt (1 samples, 0.05%)</title><rect x="570.7" y="149" width="0.6" height="15.0" fill="rgb(248,192,19)" rx="2" ry="2" />
+<text  x="573.73" y="159.5" ></text>
+</g>
+<g >
+<title>__softirqentry_text_start      (1 samples, 0.05%)</title><rect x="11.2" y="165" width="0.6" height="15.0" fill="rgb(229,57,28)" rx="2" ry="2" />
+<text  x="14.21" y="175.5" ></text>
+</g>
+<g >
+<title>ParCompactionManager::follow_marking_stacks() (945 samples, 48.34%)</title><rect x="502.5" y="197" width="570.4" height="15.0" fill="rgb(248,202,54)" rx="2" ry="2" />
+<text  x="505.52" y="207.5" >ParCompactionManager::follow_marking_stacks()</text>
+</g>
+<g >
+<title>jni_invoke_static(JNIEnv_*, JavaValue*, _jobject*, JNICallType, _jmethodID*, JNI_ArgumentPusher*, Thread*) [clone .isra.83] [clone .constprop.254] (7 samples, 0.36%)</title><rect x="1185.8" y="213" width="4.2" height="15.0" fill="rgb(243,50,1)" rx="2" ry="2" />
+<text  x="1188.77" y="223.5" ></text>
+</g>
+<g >
+<title>ParallelCompactData::add_obj(HeapWordImpl**, unsigned long) (5 samples, 0.26%)</title><rect x="911.7" y="165" width="3.1" height="15.0" fill="rgb(206,115,12)" rx="2" ry="2" />
+<text  x="914.75" y="175.5" ></text>
+</g>
+<g >
+<title>ParMarkBitMap::mark_obj(HeapWordImpl**, unsigned long) (2 samples, 0.10%)</title><rect x="821.2" y="165" width="1.2" height="15.0" fill="rgb(237,137,20)" rx="2" ry="2" />
+<text  x="824.21" y="175.5" ></text>
+</g>
+<g >
+<title>ParMarkBitMap::mark_obj(HeapWordImpl**, unsigned long)      (137 samples, 7.01%)</title><rect x="1072.9" y="197" width="82.7" height="15.0" fill="rgb(233,114,45)" rx="2" ry="2" />
+<text  x="1075.91" y="207.5" >ParMarkBi..</text>
+</g>
+<g >
+<title>ParallelCompactData::add_obj(HeapWordImpl**, unsigned long)      (148 samples, 7.57%)</title><rect x="822.4" y="165" width="89.3" height="15.0" fill="rgb(243,72,11)" rx="2" ry="2" />
+<text  x="825.42" y="175.5" >ParallelCo..</text>
+</g>
+<g >
+<title>MoveAndUpdateClosure::do_addr(HeapWordImpl**, unsigned long) (25 samples, 1.28%)</title><rect x="27.5" y="149" width="15.1" height="15.0" fill="rgb(216,3,23)" rx="2" ry="2" />
+<text  x="30.50" y="159.5" ></text>
+</g>
+<g >
+<title>entry_SYSCALL_64_after_hwframe (2 samples, 0.10%)</title><rect x="1184.6" y="261" width="1.2" height="15.0" fill="rgb(212,140,6)" rx="2" ry="2" />
+<text  x="1187.57" y="271.5" ></text>
+</g>
+<g >
+<title>ParMarkBitMap::live_words_in_range(ParCompactionManager*, HeapWordImpl**, oopDesc*) const (4 samples, 0.20%)</title><rect x="40.2" y="101" width="2.4" height="15.0" fill="rgb(225,96,49)" rx="2" ry="2" />
+<text  x="43.18" y="111.5" ></text>
+</g>
+<g >
+<title>schedule      (2 samples, 0.10%)</title><rect x="1155.6" y="149" width="1.2" height="15.0" fill="rgb(241,202,10)" rx="2" ry="2" />
+<text  x="1158.60" y="159.5" ></text>
+</g>
+<g >
+<title>_IO_file_xsputn      (1 samples, 0.05%)</title><rect x="11.8" y="277" width="0.6" height="15.0" fill="rgb(210,169,22)" rx="2" ry="2" />
+<text  x="14.81" y="287.5" ></text>
+</g>
+<g >
+<title>void OopOopIterateDispatch&lt;PCIterateMarkAndPushClosure&gt;::Table::oop_oop_iterate&lt;InstanceKlass, unsigned int&gt;(PCIterateMarkAndPushClosure*, oopDesc*, Klass*)      (247 samples, 12.63%)</title><rect x="916.0" y="165" width="149.1" height="15.0" fill="rgb(219,69,33)" rx="2" ry="2" />
+<text  x="918.97" y="175.5" >void OopOopIterateD..</text>
+</g>
+<g >
+<title>vgdrvHeartbeatTimerHandler (1 samples, 0.05%)</title><rect x="915.4" y="53" width="0.6" height="15.0" fill="rgb(242,202,31)" rx="2" ry="2" />
+<text  x="918.37" y="63.5" ></text>
+</g>
+<g >
+<title>do_IRQ (3 samples, 0.15%)</title><rect x="12.4" y="245" width="1.8" height="15.0" fill="rgb(238,43,50)" rx="2" ry="2" />
+<text  x="15.41" y="255.5" ></text>
+</g>
+<g >
+<title>ClassLoaderData::oops_do(OopClosure*, int, bool)      (23 samples, 1.18%)</title><rect x="556.8" y="165" width="13.9" height="15.0" fill="rgb(215,2,54)" rx="2" ry="2" />
+<text  x="559.84" y="175.5" ></text>
+</g>
+<g >
+<title>run_timer_softirq (1 samples, 0.05%)</title><rect x="914.2" y="85" width="0.6" height="15.0" fill="rgb(215,101,0)" rx="2" ry="2" />
+<text  x="917.16" y="95.5" ></text>
+</g>
+<g >
+<title>Main.count      (7 samples, 0.36%)</title><rect x="1185.8" y="133" width="4.2" height="15.0" fill="rgb(232,148,19)" rx="2" ry="2" />
+<text  x="1188.77" y="143.5" ></text>
+</g>
+<g >
+<title>smp_apic_timer_interrupt (5 samples, 0.26%)</title><rect x="911.7" y="133" width="3.1" height="15.0" fill="rgb(241,125,47)" rx="2" ry="2" />
+<text  x="914.75" y="143.5" ></text>
+</g>
+<g >
+<title>[UNKNOWN]      (1 samples, 0.05%)</title><rect x="10.6" y="229" width="0.6" height="15.0" fill="rgb(224,91,6)" rx="2" ry="2" />
+<text  x="13.60" y="239.5" ></text>
+</g>
+<g >
+<title>ClassLoaderData::oops_do(OopClosure*, int, bool) (1 samples, 0.05%)</title><rect x="570.7" y="165" width="0.6" height="15.0" fill="rgb(253,90,48)" rx="2" ry="2" />
+<text  x="573.73" y="175.5" ></text>
+</g>
+<g >
+<title>exit_to_usermode_loop      (4 samples, 0.20%)</title><rect x="221.3" y="149" width="2.4" height="15.0" fill="rgb(226,74,6)" rx="2" ry="2" />
+<text  x="224.25" y="159.5" ></text>
+</g>
+<g >
+<title>Attach Listener (7 samples, 0.36%)</title><rect x="10.0" y="293" width="4.2" height="15.0" fill="rgb(222,189,50)" rx="2" ry="2" />
+<text  x="13.00" y="303.5" ></text>
+</g>
+<g >
+<title>ParallelCompactData::add_obj(HeapWordImpl**, unsigned long)      (2 samples, 0.10%)</title><rect x="47.4" y="165" width="1.2" height="15.0" fill="rgb(226,78,54)" rx="2" ry="2" />
+<text  x="50.42" y="175.5" ></text>
+</g>
+<g >
+<title>__softirqentry_text_start      (2 samples, 0.10%)</title><rect x="821.2" y="101" width="1.2" height="15.0" fill="rgb(211,41,2)" rx="2" ry="2" />
+<text  x="824.21" y="111.5" ></text>
+</g>
+<g >
+<title>ParCompactionManager::follow_contents(oopDesc*) (842 samples, 43.07%)</title><rect x="556.8" y="181" width="508.3" height="15.0" fill="rgb(233,200,22)" rx="2" ry="2" />
+<text  x="559.84" y="191.5" >ParCompactionManager::follow_contents(oopDesc*)</text>
+</g>
+<g >
+<title>_raw_spin_lock      (1 samples, 0.05%)</title><rect x="1185.2" y="181" width="0.6" height="15.0" fill="rgb(242,13,23)" rx="2" ry="2" />
+<text  x="1188.17" y="191.5" ></text>
+</g>
+<g >
+<title>irq_exit (2 samples, 0.10%)</title><rect x="232.1" y="133" width="1.2" height="15.0" fill="rgb(253,105,38)" rx="2" ry="2" />
+<text  x="235.12" y="143.5" ></text>
+</g>
+<g >
+<title>__softirqentry_text_start      (4 samples, 0.20%)</title><rect x="911.7" y="101" width="2.5" height="15.0" fill="rgb(252,169,1)" rx="2" ry="2" />
+<text  x="914.75" y="111.5" ></text>
+</g>
+<g >
+<title>apic_timer_interrupt (2 samples, 0.10%)</title><rect x="821.2" y="149" width="1.2" height="15.0" fill="rgb(233,103,21)" rx="2" ry="2" />
+<text  x="824.21" y="159.5" ></text>
+</g>
+<g >
+<title>irq_exit (5 samples, 0.26%)</title><rect x="218.2" y="149" width="3.1" height="15.0" fill="rgb(247,22,26)" rx="2" ry="2" />
+<text  x="221.24" y="159.5" ></text>
+</g>
+<g >
+<title>[UNKNOWN] (2 samples, 0.10%)</title><rect x="10.6" y="277" width="1.2" height="15.0" fill="rgb(219,1,12)" rx="2" ry="2" />
+<text  x="13.60" y="287.5" ></text>
+</g>
+<g >
+<title>[UNKNOWN] (1 samples, 0.05%)</title><rect x="45.0" y="149" width="0.6" height="15.0" fill="rgb(206,139,54)" rx="2" ry="2" />
+<text  x="48.01" y="159.5" ></text>
+</g>
+<g >
+<title>do_syscall_64 (2 samples, 0.10%)</title><rect x="1184.6" y="245" width="1.2" height="15.0" fill="rgb(225,220,34)" rx="2" ry="2" />
+<text  x="1187.57" y="255.5" ></text>
+</g>
+<g >
+<title>ParallelCompactData::calc_new_pointer(HeapWordImpl**, ParCompactionManager*)      (44 samples, 2.25%)</title><rect x="191.7" y="149" width="26.5" height="15.0" fill="rgb(236,153,52)" rx="2" ry="2" />
+<text  x="194.68" y="159.5" >P..</text>
+</g>
+<g >
+<title>MoveAndUpdateClosure::do_addr(HeapWordImpl**, unsigned long)      (2 samples, 0.10%)</title><rect x="17.8" y="165" width="1.3" height="15.0" fill="rgb(251,27,15)" rx="2" ry="2" />
+<text  x="20.85" y="175.5" ></text>
+</g>
+<g >
+<title>net_rx_action (2 samples, 0.10%)</title><rect x="13.0" y="197" width="1.2" height="15.0" fill="rgb(224,27,13)" rx="2" ry="2" />
+<text  x="16.02" y="207.5" ></text>
+</g>
+<g >
+<title>[UNKNOWN]      (4 samples, 0.20%)</title><rect x="42.6" y="149" width="2.4" height="15.0" fill="rgb(208,218,43)" rx="2" ry="2" />
+<text  x="45.59" y="159.5" ></text>
+</g>
+<g >
+<title>do_page_fault (1 samples, 0.05%)</title><rect x="45.0" y="117" width="0.6" height="15.0" fill="rgb(247,147,42)" rx="2" ry="2" />
+<text  x="48.01" y="127.5" ></text>
+</g>
+<g >
+<title>irq_exit (1 samples, 0.05%)</title><rect x="570.7" y="117" width="0.6" height="15.0" fill="rgb(234,51,12)" rx="2" ry="2" />
+<text  x="573.73" y="127.5" ></text>
+</g>
+<g >
+<title>VM Periodic Tas (3 samples, 0.15%)</title><rect x="1184.0" y="293" width="1.8" height="15.0" fill="rgb(250,113,38)" rx="2" ry="2" />
+<text  x="1186.96" y="303.5" ></text>
+</g>
+<g >
+<title>__softirqentry_text_start      (1 samples, 0.05%)</title><rect x="570.7" y="101" width="0.6" height="15.0" fill="rgb(236,225,3)" rx="2" ry="2" />
+<text  x="573.73" y="111.5" ></text>
+</g>
+<g >
+<title>ParMarkBitMap::mark_obj(HeapWordImpl**, unsigned long) (2 samples, 0.10%)</title><rect x="1155.6" y="197" width="1.2" height="15.0" fill="rgb(237,217,40)" rx="2" ry="2" />
+<text  x="1158.60" y="207.5" ></text>
+</g>
+<g >
+<title>PSParallelCompact::update_and_deadwood_in_dense_prefix(ParCompactionManager*, PSParallelCompact::SpaceId, unsigned long, unsigned long) (400 samples, 20.46%)</title><rect x="48.6" y="213" width="241.5" height="15.0" fill="rgb(218,171,53)" rx="2" ry="2" />
+<text  x="51.63" y="223.5" >PSParallelCompact::update_and_de..</text>
+</g>
+<g >
+<title>ParallelCompactData::calc_new_pointer(HeapWordImpl**, ParCompactionManager*) (11 samples, 0.56%)</title><rect x="283.4" y="181" width="6.7" height="15.0" fill="rgb(248,176,51)" rx="2" ry="2" />
+<text  x="286.42" y="191.5" ></text>
+</g>
+<g >
+<title>[UNKNOWN] (1 samples, 0.05%)</title><rect x="11.2" y="229" width="0.6" height="15.0" fill="rgb(228,94,4)" rx="2" ry="2" />
+<text  x="14.21" y="239.5" ></text>
+</g>
+<g >
+<title>start_thread (1,932 samples, 98.82%)</title><rect x="17.8" y="277" width="1166.2" height="15.0" fill="rgb(234,157,8)" rx="2" ry="2" />
+<text  x="20.85" y="287.5" >start_thread</text>
+</g>
+<g >
+<title>jni_CallStaticVoidMethod (7 samples, 0.36%)</title><rect x="1185.8" y="229" width="4.2" height="15.0" fill="rgb(218,137,48)" rx="2" ry="2" />
+<text  x="1188.77" y="239.5" ></text>
+</g>
+<g >
+<title>apic_timer_interrupt (5 samples, 0.26%)</title><rect x="911.7" y="149" width="3.1" height="15.0" fill="rgb(211,52,10)" rx="2" ry="2" />
+<text  x="914.75" y="159.5" ></text>
+</g>
+<g >
+<title>irq_exit (1 samples, 0.05%)</title><rect x="233.3" y="133" width="0.6" height="15.0" fill="rgb(225,161,32)" rx="2" ry="2" />
+<text  x="236.32" y="143.5" ></text>
+</g>
+<g >
+<title>void OopOopIterateDispatch&lt;PCAdjustPointerClosure&gt;::Table::oop_oop_iterate&lt;ObjArrayKlass, unsigned int&gt;(PCAdjustPointerClosure*, oopDesc*, Klass*) (34 samples, 1.74%)</title><rect x="269.5" y="197" width="20.6" height="15.0" fill="rgb(232,142,45)" rx="2" ry="2" />
+<text  x="272.54" y="207.5" ></text>
+</g>
+<g >
+<title>ret_from_intr (1 samples, 0.05%)</title><rect x="11.2" y="213" width="0.6" height="15.0" fill="rgb(225,151,1)" rx="2" ry="2" />
+<text  x="14.21" y="223.5" ></text>
+</g>
+<g >
+<title>smp_apic_timer_interrupt (1 samples, 0.05%)</title><rect x="570.7" y="133" width="0.6" height="15.0" fill="rgb(205,101,15)" rx="2" ry="2" />
+<text  x="573.73" y="143.5" ></text>
+</g>
+<g >
+<title>__softirqentry_text_start      (1 samples, 0.05%)</title><rect x="12.4" y="213" width="0.6" height="15.0" fill="rgb(229,162,38)" rx="2" ry="2" />
+<text  x="15.41" y="223.5" ></text>
+</g>
+<g >
+<title>all (1,955 samples, 100%)</title><rect x="10.0" y="309" width="1180.0" height="15.0" fill="rgb(252,58,9)" rx="2" ry="2" />
+<text  x="13.00" y="319.5" ></text>
+</g>
+<g >
+<title>CompactionWithStealingTask::do_it(GCTaskManager*, unsigned int) (46 samples, 2.35%)</title><rect x="17.8" y="213" width="27.8" height="15.0" fill="rgb(249,90,29)" rx="2" ry="2" />
+<text  x="20.85" y="223.5" >C..</text>
+</g>
+<g >
+<title>__softirqentry_text_start      (2 samples, 0.10%)</title><rect x="232.1" y="117" width="1.2" height="15.0" fill="rgb(246,158,54)" rx="2" ry="2" />
+<text  x="235.12" y="127.5" ></text>
+</g>
+<g >
+<title>irq_exit (5 samples, 0.26%)</title><rect x="911.7" y="117" width="3.1" height="15.0" fill="rgb(214,101,42)" rx="2" ry="2" />
+<text  x="914.75" y="127.5" ></text>
+</g>
+<g >
+<title>Klass::start_of_vtable() const      (8 samples, 0.41%)</title><rect x="571.3" y="165" width="4.9" height="15.0" fill="rgb(250,92,5)" rx="2" ry="2" />
+<text  x="574.33" y="175.5" ></text>
+</g>
+<g >
+<title>UpdateOnlyClosure::do_addr(HeapWordImpl**, unsigned long) (167 samples, 8.54%)</title><rect x="117.4" y="181" width="100.8" height="15.0" fill="rgb(252,203,35)" rx="2" ry="2" />
+<text  x="120.44" y="191.5" >UpdateOnlyCl..</text>
+</g>
+<g >
+<title>[UNKNOWN]      (1 samples, 0.05%)</title><rect x="10.0" y="277" width="0.6" height="15.0" fill="rgb(216,201,48)" rx="2" ry="2" />
+<text  x="13.00" y="287.5" ></text>
+</g>
+<g >
+<title>__softirqentry_text_start      (1 samples, 0.05%)</title><rect x="914.8" y="117" width="0.6" height="15.0" fill="rgb(229,34,15)" rx="2" ry="2" />
+<text  x="917.77" y="127.5" ></text>
+</g>
+<g >
+<title>ParMarkBitMap::iterate(ParMarkBitMapClosure*, unsigned long, unsigned long) const      (2 samples, 0.10%)</title><rect x="19.1" y="165" width="1.2" height="15.0" fill="rgb(226,173,12)" rx="2" ry="2" />
+<text  x="22.05" y="175.5" ></text>
+</g>
+<g >
+<title>__softirqentry_text_start      (1 samples, 0.05%)</title><rect x="233.3" y="117" width="0.6" height="15.0" fill="rgb(238,180,8)" rx="2" ry="2" />
+<text  x="236.32" y="127.5" ></text>
+</g>
+<g >
+<title>ParallelCompactData::add_obj(HeapWordImpl**, unsigned long)      (45 samples, 2.30%)</title><rect x="1156.8" y="197" width="27.2" height="15.0" fill="rgb(222,90,31)" rx="2" ry="2" />
+<text  x="1159.80" y="207.5" >P..</text>
+</g>
+<g >
+<title>prepare_exit_to_usermode (2 samples, 0.10%)</title><rect x="1155.6" y="165" width="1.2" height="15.0" fill="rgb(235,38,34)" rx="2" ry="2" />
+<text  x="1158.60" y="175.5" ></text>
+</g>
+<g >
+<title>Main.loop (7 samples, 0.36%)</title><rect x="1185.8" y="149" width="4.2" height="15.0" fill="rgb(206,65,37)" rx="2" ry="2" />
+<text  x="1188.77" y="159.5" ></text>
+</g>
+<g >
+<title>void OopOopIterateDispatch&lt;PCAdjustPointerClosure&gt;::Table::oop_oop_iterate&lt;ObjArrayKlass, unsigned int&gt;(PCAdjustPointerClosure*, oopDesc*, Klass*)      (8 samples, 0.41%)</title><rect x="264.7" y="197" width="4.8" height="15.0" fill="rgb(236,120,32)" rx="2" ry="2" />
+<text  x="267.71" y="207.5" ></text>
+</g>
+<g >
+<title>java (7 samples, 0.36%)</title><rect x="1185.8" y="293" width="4.2" height="15.0" fill="rgb(239,169,41)" rx="2" ry="2" />
+<text  x="1188.77" y="303.5" ></text>
+</g>
+<g >
+<title>_IO_file_xsputn (3 samples, 0.15%)</title><rect x="12.4" y="277" width="1.8" height="15.0" fill="rgb(207,74,3)" rx="2" ry="2" />
+<text  x="15.41" y="287.5" ></text>
+</g>
+<g >
+<title>ParMarkBitMap::iterate(ParMarkBitMapClosure*, unsigned long, unsigned long) const (42 samples, 2.15%)</title><rect x="20.3" y="165" width="25.3" height="15.0" fill="rgb(251,96,5)" rx="2" ry="2" />
+<text  x="23.26" y="175.5" >P..</text>
+</g>
+<g >
+<title>ParCompactionManager::follow_marking_stacks() (5 samples, 0.26%)</title><rect x="45.6" y="197" width="3.0" height="15.0" fill="rgb(218,61,40)" rx="2" ry="2" />
+<text  x="48.61" y="207.5" ></text>
+</g>
+<g >
+<title>do_IRQ (1 samples, 0.05%)</title><rect x="11.2" y="197" width="0.6" height="15.0" fill="rgb(207,47,48)" rx="2" ry="2" />
+<text  x="14.21" y="207.5" ></text>
+</g>
+<g >
+<title>      (6 samples, 0.31%)</title><rect x="14.2" y="277" width="3.6" height="15.0" fill="rgb(222,52,9)" rx="2" ry="2" />
+<text  x="17.23" y="287.5" ></text>
+</g>
+<g >
+<title>void OopOopIterateDispatch&lt;PCAdjustPointerClosure&gt;::Table::oop_oop_iterate&lt;InstanceKlass, unsigned int&gt;(PCAdjustPointerClosure*, oopDesc*, Klass*)      (14 samples, 0.72%)</title><rect x="223.7" y="181" width="8.4" height="15.0" fill="rgb(254,167,48)" rx="2" ry="2" />
+<text  x="226.67" y="191.5" ></text>
+</g>
+<g >
+<title>do_futex (1 samples, 0.05%)</title><rect x="1185.2" y="213" width="0.6" height="15.0" fill="rgb(212,173,26)" rx="2" ry="2" />
+<text  x="1188.17" y="223.5" ></text>
+</g>
+<g >
+<title>JavaCalls::call_helper(JavaValue*, methodHandle const&amp;, JavaCallArguments*, Thread*) (7 samples, 0.36%)</title><rect x="1185.8" y="197" width="4.2" height="15.0" fill="rgb(241,147,7)" rx="2" ry="2" />
+<text  x="1188.77" y="207.5" ></text>
+</g>
+<g >
+<title>run_timer_softirq (1 samples, 0.05%)</title><rect x="915.4" y="101" width="0.6" height="15.0" fill="rgb(252,113,44)" rx="2" ry="2" />
+<text  x="918.37" y="111.5" ></text>
+</g>
+<g >
+<title>ret_from_intr (3 samples, 0.15%)</title><rect x="12.4" y="261" width="1.8" height="15.0" fill="rgb(225,8,43)" rx="2" ry="2" />
+<text  x="15.41" y="271.5" ></text>
+</g>
+<g >
+<title>GCTaskThread::run() (1,932 samples, 98.82%)</title><rect x="17.8" y="229" width="1166.2" height="15.0" fill="rgb(235,211,7)" rx="2" ry="2" />
+<text  x="20.85" y="239.5" >GCTaskThread::run()</text>
+</g>
+<g >
+<title>ParCompactionManager::follow_marking_stacks()      (327 samples, 16.73%)</title><rect x="305.2" y="197" width="197.3" height="15.0" fill="rgb(251,174,30)" rx="2" ry="2" />
+<text  x="308.15" y="207.5" >ParCompactionManager::fol..</text>
+</g>
+<g >
+<title>smp_apic_timer_interrupt (2 samples, 0.10%)</title><rect x="232.1" y="149" width="1.2" height="15.0" fill="rgb(223,70,33)" rx="2" ry="2" />
+<text  x="235.12" y="159.5" ></text>
+</g>
+<g >
+<title>ParCompactionManager::follow_contents(oopDesc*)      (25 samples, 1.28%)</title><rect x="290.1" y="197" width="15.1" height="15.0" fill="rgb(226,36,24)" rx="2" ry="2" />
+<text  x="293.06" y="207.5" ></text>
+</g>
+<g >
+<title>__pthread_enable_asynccancel      (1 samples, 0.05%)</title><rect x="1184.0" y="277" width="0.6" height="15.0" fill="rgb(210,96,20)" rx="2" ry="2" />
+<text  x="1186.96" y="287.5" ></text>
+</g>
+<g >
+<title>apic_timer_interrupt (5 samples, 0.26%)</title><rect x="1065.1" y="181" width="3.0" height="15.0" fill="rgb(237,77,38)" rx="2" ry="2" />
+<text  x="1068.06" y="191.5" ></text>
+</g>
+<g >
+<title>JavaMain (7 samples, 0.36%)</title><rect x="1185.8" y="245" width="4.2" height="15.0" fill="rgb(218,7,6)" rx="2" ry="2" />
+<text  x="1188.77" y="255.5" ></text>
+</g>
+<g >
+<title>__softirqentry_text_start      (5 samples, 0.26%)</title><rect x="1065.1" y="133" width="3.0" height="15.0" fill="rgb(238,140,24)" rx="2" ry="2" />
+<text  x="1068.06" y="143.5" ></text>
+</g>
+<g >
+<title>void OopOopIterateDispatch&lt;PCAdjustPointerClosure&gt;::Table::oop_oop_iterate&lt;InstanceKlass, unsigned int&gt;(PCAdjustPointerClosure*, oopDesc*, Klass*) (3 samples, 0.15%)</title><rect x="232.1" y="181" width="1.8" height="15.0" fill="rgb(223,18,42)" rx="2" ry="2" />
+<text  x="235.12" y="191.5" ></text>
+</g>
+<g >
+<title>void OopOopIterateDispatch&lt;PCAdjustPointerClosure&gt;::Table::oop_oop_iterate&lt;InstanceKlass, unsigned int&gt;(PCAdjustPointerClosure*, oopDesc*, Klass*) (19 samples, 0.97%)</title><rect x="31.1" y="133" width="11.5" height="15.0" fill="rgb(225,36,10)" rx="2" ry="2" />
+<text  x="34.13" y="143.5" ></text>
+</g>
+<g >
+<title>MoveAndUpdateClosure::do_addr(HeapWordImpl**, unsigned long)      (12 samples, 0.61%)</title><rect x="20.3" y="149" width="7.2" height="15.0" fill="rgb(223,200,25)" rx="2" ry="2" />
+<text  x="23.26" y="159.5" ></text>
+</g>
+<g >
+<title>std::ctype&lt;char&gt;::~ctype() (2 samples, 0.10%)</title><rect x="10.6" y="261" width="1.2" height="15.0" fill="rgb(218,226,23)" rx="2" ry="2" />
+<text  x="13.60" y="271.5" ></text>
+</g>
+<g >
+<title>prepare_exit_to_usermode (4 samples, 0.20%)</title><rect x="221.3" y="165" width="2.4" height="15.0" fill="rgb(250,17,38)" rx="2" ry="2" />
+<text  x="224.25" y="175.5" ></text>
+</g>
+<g >
+<title>UpdateOnlyClosure::do_addr(HeapWordImpl**, unsigned long)      (17 samples, 0.87%)</title><rect x="107.2" y="181" width="10.2" height="15.0" fill="rgb(207,194,44)" rx="2" ry="2" />
+<text  x="110.18" y="191.5" ></text>
+</g>
+<g >
+<title>swapgs_restore_regs_and_return_to_usermode (2 samples, 0.10%)</title><rect x="1155.6" y="181" width="1.2" height="15.0" fill="rgb(205,37,29)" rx="2" ry="2" />
+<text  x="1158.60" y="191.5" ></text>
+</g>
+<g >
+<title>apic_timer_interrupt (5 samples, 0.26%)</title><rect x="218.2" y="181" width="3.1" height="15.0" fill="rgb(220,13,51)" rx="2" ry="2" />
+<text  x="221.24" y="191.5" ></text>
+</g>
+<g >
+<title>ParMarkBitMap::mark_obj(HeapWordImpl**, unsigned long)      (406 samples, 20.77%)</title><rect x="576.2" y="165" width="245.0" height="15.0" fill="rgb(214,189,50)" rx="2" ry="2" />
+<text  x="579.16" y="175.5" >ParMarkBitMap::mark_obj(HeapWord..</text>
+</g>
+<g >
+<title>irq_exit (3 samples, 0.15%)</title><rect x="12.4" y="229" width="1.8" height="15.0" fill="rgb(221,158,49)" rx="2" ry="2" />
+<text  x="15.41" y="239.5" ></text>
+</g>
+<g >
+<title>ParCompactionManager::follow_contents(oopDesc*) (3 samples, 0.15%)</title><rect x="46.8" y="181" width="1.8" height="15.0" fill="rgb(215,70,2)" rx="2" ry="2" />
+<text  x="49.82" y="191.5" ></text>
+</g>
+<g >
+<title>futex_wait (1 samples, 0.05%)</title><rect x="1185.2" y="197" width="0.6" height="15.0" fill="rgb(207,193,46)" rx="2" ry="2" />
+<text  x="1188.17" y="207.5" ></text>
+</g>
+<g >
+<title>page_fault (1 samples, 0.05%)</title><rect x="45.0" y="133" width="0.6" height="15.0" fill="rgb(221,151,5)" rx="2" ry="2" />
+<text  x="48.01" y="143.5" ></text>
+</g>
+<g >
+<title>ParCompactionManager::drain_region_stacks() (46 samples, 2.35%)</title><rect x="17.8" y="197" width="27.8" height="15.0" fill="rgb(223,4,34)" rx="2" ry="2" />
+<text  x="20.85" y="207.5" >P..</text>
+</g>
+<g >
+<title>call_timer_fn (1 samples, 0.05%)</title><rect x="915.4" y="85" width="0.6" height="15.0" fill="rgb(247,200,33)" rx="2" ry="2" />
+<text  x="918.37" y="95.5" ></text>
+</g>
+<g >
+<title>PSParallelCompact::fill_blocks(unsigned long)      (3 samples, 0.15%)</title><rect x="283.4" y="165" width="1.8" height="15.0" fill="rgb(210,29,20)" rx="2" ry="2" />
+<text  x="286.42" y="175.5" ></text>
+</g>
+<g >
+<title>e1000_clean      (2 samples, 0.10%)</title><rect x="13.0" y="181" width="1.2" height="15.0" fill="rgb(218,14,38)" rx="2" ry="2" />
+<text  x="16.02" y="191.5" ></text>
+</g>
+<g >
+<title>start_thread (7 samples, 0.36%)</title><rect x="1185.8" y="277" width="4.2" height="15.0" fill="rgb(248,185,0)" rx="2" ry="2" />
+<text  x="1188.77" y="287.5" ></text>
+</g>
+<g >
+<title>pthread_cond_timedwait@@GLIBC_2.3.2 (2 samples, 0.10%)</title><rect x="1184.6" y="277" width="1.2" height="15.0" fill="rgb(231,141,19)" rx="2" ry="2" />
+<text  x="1187.57" y="287.5" ></text>
+</g>
+<g >
+<title>Interpreter (7 samples, 0.36%)</title><rect x="1185.8" y="165" width="4.2" height="15.0" fill="rgb(220,82,0)" rx="2" ry="2" />
+<text  x="1188.77" y="175.5" ></text>
+</g>
+<g >
+<title>ParMarkBitMap::iterate(ParMarkBitMapClosure*, ParMarkBitMapClosure*, unsigned long, unsigned long, unsigned long) const (210 samples, 10.74%)</title><rect x="107.2" y="197" width="126.7" height="15.0" fill="rgb(214,66,39)" rx="2" ry="2" />
+<text  x="110.18" y="207.5" >ParMarkBitMap::..</text>
+</g>
+<g >
+<title>__softirqentry_text_start (2 samples, 0.10%)</title><rect x="13.0" y="213" width="1.2" height="15.0" fill="rgb(217,181,36)" rx="2" ry="2" />
+<text  x="16.02" y="223.5" ></text>
+</g>
+<g >
+<title>do_IRQ (1 samples, 0.05%)</title><rect x="233.3" y="149" width="0.6" height="15.0" fill="rgb(241,154,25)" rx="2" ry="2" />
+<text  x="236.32" y="159.5" ></text>
+</g>
+</g>
+</svg>
