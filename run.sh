@@ -48,5 +48,5 @@ if [ $? = 0 ]; then
     #run_with_agent $AGENT "duration=5;sample_mem=mem.log;sample_cpu=cpu.log"
     run_and_attach $AGENT "duration=3;sample_mem=mem.log;sample_cpu=cpu.log"
     #FlameGraph/flamegraph.pl profile.out > flame.svg
-    /home/sun/FlameGraph/flamegraph.pl cpu.log > flame.svg
+    ./flamegraph.pl cpu.log > flame.svg
 fi
