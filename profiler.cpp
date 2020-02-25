@@ -99,28 +99,17 @@ int do_perf_event(struct bpf_perf_event_data *ctx) {
     return 0;
 }
 )";
-/*
-static void trace(jvmtiEnv* jvmti, const char* fmt, ...) {
+
+static jlong get_time(jvmtiEnv* jvmti) {
     jlong current_time;
     jvmti->GetTime(&current_time);
-
-    char buf[MAX_STACK_DEPTH];
-    va_list args;
-    va_start(args, fmt);
-    vsnprintf(buf, sizeof(buf), fmt, args);
-    va_end(args);
-
-    jvmti->RawMonitorEnter(vmtrace_lock);
-
-    fprintf(out_mem, "[%.5f] %s\n", (current_time - start_time) / 1000000000.0, buf);
-    
-    jvmti->RawMonitorExit(vmtrace_lock);
+    return current_time;
 }
-*/
 
 // Converts JVM internal class signature to human readable name
 static string decode_class_signature(char* class_sig) {
-    switch (class_sig[0]) {
+    //Lorg/net/XX  [I
+    switch (class_sig[1]) {
         case 'B': return "byte";
         case 'C': return "char";
         case 'D': return "double";
@@ -129,9 +118,8 @@ static string decode_class_signature(char* class_sig) {
         case 'J': return "long";
         case 'S': return "short";
         case 'Z': return "boolean";
-        case '[': return decode_class_signature(class_sig + 1) + "[]";
     }
-    // rm first 'L' and last ';'
+    // rm first 'L'|'[' and last ';'
     class_sig++;
     class_sig[strlen(class_sig) - 1] = 0;
 
@@ -142,39 +130,38 @@ static string decode_class_signature(char* class_sig) {
 
     return class_sig;
 }
-
+void jvmti_free(char* ptr){
+    if (ptr != NULL) jvmti->Deallocate((unsigned char*) ptr);
+}
 static string get_method_name(jmethodID method) {
     jclass method_class;
     char* class_sig = NULL;
     char* method_name = NULL;
     string result;
-
     if (jvmti->GetMethodDeclaringClass(method, &method_class) == 0 &&
         jvmti->GetClassSignature(method_class, &class_sig, NULL) == 0 &&
         jvmti->GetMethodName(method, &method_name, NULL, NULL) == 0) {
         result.assign(decode_class_signature(class_sig) + "." + method_name);
+        jvmti_free(method_name);
+        jvmti_free(class_sig);
+	return result;
     } else {
-        result.assign("(NONAME)");
+        return "(NONAME)";
     }
-
-    jvmti->Deallocate((unsigned char*) method_name);
-    jvmti->Deallocate((unsigned char*) class_sig);
-    return result;
 }
 
-static void dump_tree(const string stack_line, const string& class_name, const Frame* f) {
+static void write_line(const string stack_line, const string& class_name, const Frame* f) {
     if (f->samples > 0) {
-        //cout << stack_line << class_name << "_[i] " << f->samples << endl;
         fprintf(out_mem, "%s %s_[%ld] \n", stack_line.c_str(), class_name.c_str(), f->samples);
     }
     for (auto it = f->children.begin(); it != f->children.end(); ++it) {
-        dump_tree(stack_line + get_method_name(it->first) + ";", class_name, &it->second);
+        write_line(stack_line + get_method_name(it->first) + ";", class_name, &it->second);
     }
 }
 
-static void dump_profile() {
+static void write_loop_root() {
     for (auto it = root.begin(); it != root.end(); ++it) {
-        dump_tree("", it->first, &it->second);
+        write_line("", it->first, &it->second);
     }
 }
 
@@ -189,7 +176,6 @@ static void record_stack_trace(char* class_sig, jvmtiFrameInfo* frames, jint cou
 
 void JNICALL SampledObjectAlloc(jvmtiEnv* jvmti, JNIEnv* env, jthread thread,
                                 jobject object, jclass object_klass, jlong size) {
-
     jvmtiFrameInfo frames[MAX_STACK_DEPTH];
     jint count;
     if (jvmti->GetStackTrace(thread, 0, MAX_STACK_DEPTH, frames, &count) != 0) {
@@ -200,17 +186,16 @@ void JNICALL SampledObjectAlloc(jvmtiEnv* jvmti, JNIEnv* env, jthread thread,
     if (jvmti->GetClassSignature(object_klass, &class_sig, NULL) != 0) {
         return;
     }
-
     jvmti->RawMonitorEnter(tree_lock);
     record_stack_trace(class_sig, frames, count, size);
     jvmti->RawMonitorExit(tree_lock);
 
-    jvmti->Deallocate((unsigned char*) class_sig);
+    jvmti_free(class_sig);
 }
 
 void JNICALL DataDumpRequest(jvmtiEnv* jvmti) {
     jvmti->RawMonitorEnter(tree_lock);
-    dump_profile();
+    write_loop_root();
     jvmti->RawMonitorExit(tree_lock);
 }
 
