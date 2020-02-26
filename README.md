@@ -1,6 +1,6 @@
 # jvm eBPF profiler
 
-I need a tool for less overhead, robust, accurate, now I can generate cpu flame from it.
+I need a tool for low overhead, robust, accurate, so now I can generate cpu flame from it.
 
 Install:
 apt-get -y install bison build-essential cmake flex git libedit-dev \
