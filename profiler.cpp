@@ -17,6 +17,7 @@ using namespace std;
 #define MAX_STACK_DEPTH 128
 static bool writing_perf = false;
 static FILE* out_cpu;
+static FILE* out_thread;
 static FILE* out_mem;
 static FILE* out_perf;
 static jlong start_time;
@@ -25,6 +26,8 @@ static jvmtiEnv* jvmti = NULL;
 static jrawMonitorID tree_lock;
 static int duration = 10;
 static ebpf::BPF bpf;
+static map<int,string> BPF_TXT_MAP;
+static map<int,string> BPF_FN_MAP;
 static int PERF_TYPE_SOFTWARE = 1;
 static int PERF_COUNT_HW_CPU_CYCLES = 0;
 
@@ -44,8 +47,41 @@ struct stack_key_t {
   int kernel_stack_id;
   char name[16];
 };
+struct thread_key_t {
+    int pid;
+    int tid;
+    long state;
+    char name[16];
+};
 
-string BPF_TXT = R"(
+string BPF_TXT_TRD = R"(
+#include <linux/sched.h>
+#include <uapi/linux/ptrace.h>
+#include <uapi/linux/bpf_perf_event.h>
+struct thread_key_t {
+    u32 pid;
+    u32 tid;
+    long state;
+    char name[TASK_COMM_LEN];
+};
+BPF_HASH(counts, struct thread_key_t);
+
+int do_perf_event_thread(struct bpf_perf_event_data *ctx) {
+    struct task_struct *p = (struct task_struct *) bpf_get_current_task();
+    u32 tgid = p->tgid;
+    if (p->pid == 0) return 0;
+    if (!PID) return 0;
+
+    struct thread_key_t key = {.pid = p->tgid};
+    key.tid = p->pid;
+    key.state = p->state;  // -1 unrunnable, 0 runnable, >0 stopped
+    bpf_get_current_comm(&key.name, sizeof(key.name));
+    counts.increment(key);
+    return 0;
+}
+)";
+///////////////////////////////////////////
+string BPF_TXT_FLM = R"(
 #include <linux/sched.h>
 #include <uapi/linux/ptrace.h>
 #include <uapi/linux/bpf_perf_event.h>
@@ -60,7 +96,7 @@ struct stack_key_t {
 BPF_HASH(counts, struct stack_key_t);
 BPF_STACK_TRACE(stack_traces, 16384); //STACK_SIZE
 
-int do_perf_event(struct bpf_perf_event_data *ctx) {
+int do_perf_event_flame(struct bpf_perf_event_data *ctx) {
     u64 id = bpf_get_current_pid_tgid();
     u32 tgid = id >> 32;
     u32 pid = id;
@@ -99,6 +135,18 @@ int do_perf_event(struct bpf_perf_event_data *ctx) {
     return 0;
 }
 )";
+void genbpftextmap(){
+    BPF_TXT_MAP[0]=BPF_TXT_FLM;
+    BPF_TXT_MAP[1]=BPF_TXT_TRD;
+    BPF_FN_MAP[0]="do_perf_event_flame";
+    BPF_FN_MAP[1]="do_perf_event_thread";
+}
+string get_prof_func(int id){
+    return BPF_FN_MAP[id];
+}
+string getbpftext(int id){
+    return BPF_TXT_MAP[id];
+}
 
 static jlong get_time(jvmtiEnv* jvmti) {
     jlong current_time;
@@ -122,7 +170,6 @@ static string decode_class_signature(char* class_sig) {
     // rm first 'L'|'[' and last ';'
     class_sig++;
     class_sig[strlen(class_sig) - 1] = 0;
-
     // Replace '/' with '.'
     for (char* c = class_sig; *c; c++) {
         if (*c == '/') *c = '.';
@@ -236,19 +283,20 @@ bool str_replace(string& str, const string& from, const string& to) {
     return true;
 }
 
-void StartBPF() {
+void StartBPF(int id) {
     //ebpf::BPF bpf;
     int pid = getpid();
     const string PID = "(tgid=="+to_string(pid)+")";
+    string BPF_TXT = getbpftext(id);
     str_replace(BPF_TXT, "PID", PID);
     //cout << "BPF:" << endl << BPF_TXT << endl;
-
     auto init_r = bpf.init(BPF_TXT);
     if (init_r.code() != 0) {
         cerr << init_r.msg() << endl;
     }
     int pid2=-1;
-    auto att_r = bpf.attach_perf_event(PERF_TYPE_SOFTWARE, PERF_COUNT_HW_CPU_CYCLES, "do_perf_event", 99, 0, pid2);
+    string fn = get_prof_func(id);
+    auto att_r = bpf.attach_perf_event(PERF_TYPE_SOFTWARE, PERF_COUNT_HW_CPU_CYCLES, fn, 99, 0, pid2);
     if (att_r.code() != 0) {
         cerr << att_r.msg() << endl;
     }else{
@@ -265,6 +313,24 @@ void StopBPF(){
         out_perf=NULL;
     }
     bpf.detach_perf_event(PERF_TYPE_SOFTWARE, PERF_COUNT_HW_CPU_CYCLES);
+}
+void PrintThread(){
+    auto table = bpf.get_hash_table<thread_key_t, uint64_t>("counts").get_table_offline();
+    sort( table.begin(), table.end(),
+      [](pair<thread_key_t, uint64_t> a, pair<thread_key_t, uint64_t> b) {
+        return a.second < b.second;
+      }
+    );
+    //-1 unrunnable, 0 runnable, >0 stopped
+    //map.push
+    fprintf(out_thread, "pid\ttid\tstate\tcount\tname\n");
+    for (auto it : table) {
+        //cout << "pid:" << it.first.pid << "	tid:" << it.first.tid << "	state:" << it.first.state << "	counts:" << it.second << "	name:" << it.first.name << endl;
+	fprintf(out_thread, "%d\t%d\t%ld\t%ld\t%s\n", it.first.pid,it.first.tid,it.first.state, it.second, it.first.name );
+    }
+    fclose(out_thread);
+}
+void PrintFlame(){
     auto table = bpf.get_hash_table<stack_key_t, uint64_t>("counts").get_table_offline();
     sort( table.begin(), table.end(),
       [](pair<stack_key_t, uint64_t> a, pair<stack_key_t, uint64_t> b) {
@@ -301,6 +367,17 @@ void StopBPF(){
         fprintf(out_cpu, "      %ld\n", it.second);
     }
     fclose(out_cpu);
+}
+
+void PrintBPF(int id){
+    switch(id){
+        case 0:
+            PrintFlame();
+	    break;
+        case 1:
+            PrintThread();
+	    break;
+    }
 }
 vector<string> parse_options(string str, char sep){
     istringstream ss(str);
@@ -360,12 +437,15 @@ void enableMemoryEvent(jvmtiEnv* jvmti){
     jvmti->GenerateEvents(JVMTI_EVENT_DYNAMIC_CODE_GENERATED);
     jvmti->GenerateEvents(JVMTI_EVENT_COMPILED_METHOD_LOAD);
 }
-void do_options(string k, string v, jvmtiEnv* jvmti){
+int do_single_options(string k, string v, jvmtiEnv* jvmti){
     if (k.compare("duration") == 0){
         duration=stoi(v);
     }else if(k.compare("sample_cpu")==0){
-        StartBPF();
         out_cpu = fopen(v.c_str(), "w");
+        return 0;
+    }else if(k.compare("sample_thread")==0){
+        out_thread = fopen(v.c_str(), "w");
+        return 1;
     }else if(k.compare("sample_mem")==0){
         registerMemoryCapa(jvmti);
         jvmti->SetHeapSamplingInterval(1024*1024); //1m
@@ -373,29 +453,36 @@ void do_options(string k, string v, jvmtiEnv* jvmti){
 	enableMemoryEvent(jvmti);
         out_mem = fopen(v.c_str(), "w");
     }
+    return -1;
 }
 void InitFile() {
     out_mem = stderr;
     out_cpu = stdout;
+    out_thread = stdout;
     string pid = to_string(getpid());
-    string path = ("/tmp/perf-"+pid+".map"); //.c_str();
+    string path = "/tmp/perf-"+pid+".map";
     cout << "perf map: "<< path<< endl;
     out_perf = fopen(path.c_str(),"w");
 }
 JNIEXPORT jint JNICALL Agent_OnLoad(JavaVM* vm, char* options, void* reserved) {
     InitFile();
+    genbpftextmap();
     vm->GetEnv((void**) &jvmti, JVMTI_VERSION_1_0);
     jvmti->CreateRawMonitor("tree_lock", &tree_lock);
+    int id = -1;
     if (options != NULL) {
         vector<string> vkv = parse_options(string(options),';');
         for (string kv : vkv){
-	    string k = get_key(kv, "=");
-	    string v = get_value(kv, "=");
+            string k = get_key(kv, "=");
+            string v = get_value(kv, "=");
             cout << "k=" << k << " v=" << v << endl;
-            do_options(k,v,jvmti);
-	}
+            int i = do_single_options(k,v,jvmti);
+            if (i>-1) id=i;
+        }
     }
+    StartBPF(id);
     StopBPF();
+    PrintBPF(id);
     fclose(out_mem);
     return 0;
 }

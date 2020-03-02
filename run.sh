@@ -15,9 +15,13 @@ cpp_build(){
   CPP=clang++
   OS=linux
   JAVA_INC="-I$JAVA_HOME/include -I$JAVA_HOME/include/$OS"
-  OPTS="-O3 -fPIC -lbcc -lstdc++ -shared $JAVA_INC $BCC_INC"
-  #echo "$CPP $OPTS -o $AGENT profiler.cpp"
-  $CPP $OPTS -o $AGENT profiler.cpp
+  export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/lib/
+  export LIBRARY_PATH=$LIBRARY_PATH:/usr/local/lib/
+  LIB="-shared -lbcc -lstdc++"
+  #LIB="-shared -lbcc -lstdc++ "
+  OPTS="-O3 -fPIC $JAVA_INC $BCC_INC $LIB"
+  #echo "$CPP -o $AGENT profiler.cpp $OPTS"
+        $CPP -o $AGENT profiler.cpp $OPTS
 }
 
 run_and_attach(){
@@ -46,7 +50,7 @@ cpp_build
 if [ $? = 0 ]; then
     echo "build done"
     #run_with_agent $AGENT "duration=5;sample_mem=mem.log;sample_cpu=cpu.log"
-    run_and_attach $AGENT "duration=3;sample_mem=mem.log;sample_cpu=cpu.log"
-    #FlameGraph/flamegraph.pl profile.out > flame.svg
-    ./flamegraph.pl cpu.log > flame.svg
+    #run_and_attach $AGENT "duration=3;sample_mem=mem.log;sample_cpu=cpu.log"
+    run_and_attach $AGENT "duration=3;sample_thread=thread.log"
+    #./flamegraph.pl cpu.log > flame.svg
 fi
