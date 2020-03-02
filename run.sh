@@ -1,8 +1,8 @@
 
 AGENT=profiler.so
-rm -rf $AGENT log cpu.log mem.log hs_err* jcmd.log flame.svg /tmp/perf*
+rm -rf $AGENT log thread.log cpu.log mem.log hs_err* jcmd.log /tmp/perf*  #flame.svg
 LOOP=3000000
-JIT="-Xmx300m -Xms300m -XX:+UseParallelOldGC -XX:ParallelGCThreads=1 -XX:+PreserveFramePointer"
+JIT="-Xmx300m -Xms300m -XX:+UseParallelOldGC -XX:ParallelGCThreads=2 -XX:+PreserveFramePointer"
 
 JAVA_HOME=/home/sun/jbb/jdk13
 java_build(){

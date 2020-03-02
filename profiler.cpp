@@ -67,19 +67,37 @@ struct thread_key_t {
 BPF_HASH(counts, struct thread_key_t);
 
 int do_perf_event_thread(struct bpf_perf_event_data *ctx) {
-    struct task_struct *p = (struct task_struct *) bpf_get_current_task();
-    u32 tgid = p->tgid;
-    if (p->pid == 0) return 0;
+    u64 id = bpf_get_current_pid_tgid();
+    u32 tgid = id >> 32;
+    u32 pid = id;
+    if (pid == 0) return 0;
     if (!PID) return 0;
-
-    struct thread_key_t key = {.pid = p->tgid};
-    key.tid = p->pid;
-    key.state = p->state;  // -1 unrunnable, 0 runnable, >0 stopped
+    struct thread_key_t key = {.pid = tgid};
+    key.tid = pid;
+    key.state = 0;    //must be runnable
     bpf_get_current_comm(&key.name, sizeof(key.name));
     counts.increment(key);
     return 0;
 }
 )";
+/*
+int do_perf_event_thread_full(struct bpf_perf_event_data *ctx) {
+    struct task_struct *p = (struct task_struct *) bpf_get_current_task();
+    u32 tgid = p->tgid;
+    if (p->pid == 0) return 0;
+    if (!PID) return 0;
+    struct list_head *h;
+    list_for_each(h, &p->children) {                      //loop not allowed
+        struct task_struct *t = (struct task_struct*)h;
+        struct thread_key_t key = {.pid = tgid};
+        key.tid = t->pid;
+        key.state = t->state;
+        strcpy( key.name, t->comm );
+        counts.increment(key);
+    }
+    return 0;
+}
+*/
 ///////////////////////////////////////////
 string BPF_TXT_FLM = R"(
 #include <linux/sched.h>
@@ -316,11 +334,13 @@ void StopBPF(){
 }
 void PrintThread(){
     auto table = bpf.get_hash_table<thread_key_t, uint64_t>("counts").get_table_offline();
+    /*
     sort( table.begin(), table.end(),
       [](pair<thread_key_t, uint64_t> a, pair<thread_key_t, uint64_t> b) {
         return a.second < b.second;
       }
     );
+    */
     //-1 unrunnable, 0 runnable, >0 stopped
     //map.push
     fprintf(out_thread, "pid\ttid\tstate\tcount\tname\n");
