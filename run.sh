@@ -2,7 +2,7 @@
 AGENT=profiler.so
 rm -rf $AGENT log thread.log cpu.log mem.log hs_err* jcmd.log /tmp/perf*  #flame.svg
 LOOP=3000000
-JIT="-Xmx300m -Xms300m -XX:+UseParallelOldGC -XX:ParallelGCThreads=2 -XX:+PreserveFramePointer"
+JIT="-Xmx300m -Xms300m -XX:+UseParallelOldGC -XX:ParallelGCThreads=1 -XX:+PreserveFramePointer"
 
 JAVA_HOME=/home/sun/jbb/jdk13
 java_build(){
@@ -49,8 +49,9 @@ java_build
 cpp_build
 if [ $? = 0 ]; then
     echo "build done"
-    #run_with_agent $AGENT "duration=5;sample_mem=mem.log;sample_cpu=cpu.log"
+    #run_with_agent $AGENT "duration=5;sample_mem=mem.log"
     #run_and_attach $AGENT "duration=3;sample_mem=mem.log;sample_cpu=cpu.log"
-    run_and_attach $AGENT "duration=3;sample_thread=thread.log"
+    #run_and_attach $AGENT "duration=3;sample_thread=thread.log"
+    run_and_attach $AGENT "duration=3;top=9;sample_method=method.log"
     #./flamegraph.pl cpu.log > flame.svg
 fi

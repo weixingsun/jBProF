@@ -24,6 +24,7 @@ static jlong start_time;
 static jrawMonitorID vmtrace_lock;
 static jvmtiEnv* jvmti = NULL;
 static jrawMonitorID tree_lock;
+static int TOP_N = 20;
 static int duration = 10;
 static ebpf::BPF bpf;
 static map<int,string> BPF_TXT_MAP;
@@ -38,7 +39,7 @@ struct Frame {
 };
 static map<string, Frame> root;
 
-// Define the same struct to use in user space.
+//for flame generation
 struct stack_key_t {
   int pid;
   uint64_t kernel_ip;
@@ -47,6 +48,14 @@ struct stack_key_t {
   int kernel_stack_id;
   char name[16];
 };
+//for method generation
+struct method_key_t {
+  int pid;
+  uint64_t kernel_ip;
+  int user_stack_id;
+  int kernel_stack_id;
+};
+//for thread generation
 struct thread_key_t {
     int pid;
     int tid;
@@ -122,7 +131,56 @@ int do_perf_event_flame(struct bpf_perf_event_data *ctx) {
     if (!PID) return 0;
     struct stack_key_t key = {.pid = tgid};
     bpf_get_current_comm(&key.name, sizeof(key.name));
-    // get stacks
+    key.user_stack_id = stack_traces.get_stackid(&ctx->regs, BPF_F_USER_STACK);
+    key.kernel_stack_id = stack_traces.get_stackid(&ctx->regs, 0);
+    if (key.kernel_stack_id >= 0) {
+        // populate extras to fix the kernel stack
+        u64 ip = PT_REGS_IP(&ctx->regs);
+        u64 page_offset;
+        // if ip isn't sane, leave key ips as zero for later checking
+#if defined(CONFIG_X86_64) && defined(__PAGE_OFFSET_BASE)
+        // x64, 4.16, ..., 4.11, etc., but some earlier kernel didn't have it
+        page_offset = __PAGE_OFFSET_BASE;
+#elif defined(CONFIG_X86_64) && defined(__PAGE_OFFSET_BASE_L4)
+        // x64, 4.17, and later
+#if defined(CONFIG_DYNAMIC_MEMORY_LAYOUT) && defined(CONFIG_X86_5LEVEL)
+        page_offset = __PAGE_OFFSET_BASE_L5;
+#else
+        page_offset = __PAGE_OFFSET_BASE_L4;
+#endif
+#else
+        // earlier x86_64 kernels, e.g., 4.6, comes here
+        // arm64, s390, powerpc, x86_32
+        page_offset = PAGE_OFFSET;
+#endif
+        if (ip > page_offset) {
+            key.kernel_ip = ip;
+        }
+    }
+    counts.increment(key);
+    return 0;
+}
+)";
+string BPF_TXT_MTD = R"(
+#include <linux/sched.h>
+#include <uapi/linux/ptrace.h>
+#include <uapi/linux/bpf_perf_event.h>
+struct method_key_t {
+    u32 pid;
+    u64 kernel_ip;
+    int user_stack_id;
+    int kernel_stack_id;
+};
+BPF_HASH(counts, struct method_key_t);
+BPF_STACK_TRACE(stack_traces, 16384);
+
+int do_perf_event_method(struct bpf_perf_event_data *ctx) {
+    u64 id = bpf_get_current_pid_tgid();
+    u32 tgid = id >> 32;
+    u32 pid = id;
+    if (pid == 0) return 0;
+    if (!PID) return 0;
+    struct method_key_t key = {.pid = tgid};
     key.user_stack_id = stack_traces.get_stackid(&ctx->regs, BPF_F_USER_STACK);
     key.kernel_stack_id = stack_traces.get_stackid(&ctx->regs, 0);
     if (key.kernel_stack_id >= 0) {
@@ -155,9 +213,11 @@ int do_perf_event_flame(struct bpf_perf_event_data *ctx) {
 )";
 void genbpftextmap(){
     BPF_TXT_MAP[0]=BPF_TXT_FLM;
-    BPF_TXT_MAP[1]=BPF_TXT_TRD;
+    BPF_TXT_MAP[1]=BPF_TXT_MTD;
+    BPF_TXT_MAP[2]=BPF_TXT_TRD;
     BPF_FN_MAP[0]="do_perf_event_flame";
-    BPF_FN_MAP[1]="do_perf_event_thread";
+    BPF_FN_MAP[1]="do_perf_event_method";
+    BPF_FN_MAP[2]="do_perf_event_thread";
 }
 string get_prof_func(int id){
     return BPF_FN_MAP[id];
@@ -302,6 +362,7 @@ bool str_replace(string& str, const string& from, const string& to) {
 }
 
 void StartBPF(int id) {
+    cout << "StartBPF(" << id << ")" << endl;
     //ebpf::BPF bpf;
     int pid = getpid();
     const string PID = "(tgid=="+to_string(pid)+")";
@@ -314,15 +375,17 @@ void StartBPF(int id) {
     }
     int pid2=-1;
     string fn = get_prof_func(id);
-    auto att_r = bpf.attach_perf_event(PERF_TYPE_SOFTWARE, PERF_COUNT_HW_CPU_CYCLES, fn, 99, 0, pid2);
+    int freq=99;
+    auto att_r = bpf.attach_perf_event(PERF_TYPE_SOFTWARE, PERF_COUNT_HW_CPU_CYCLES, fn, freq, 0, pid2);
     if (att_r.code() != 0) {
-        cerr << att_r.msg() << endl;
+        cerr << "failed to attach fn:" << fn <<  " pid:" << pid << " err:" << att_r.msg() << endl;
     }else{
-        cout << "attached to pid:" << pid << " perf event "<< endl;
+        cout << "attached fn:"<<fn <<" to pid:" << pid << " perf event "<< endl;
     }
+    cout << "BPF sampling " << duration << " seconds" << endl;
 }
 void StopBPF(){
-    cout << "BPF sampling " << duration << " seconds" << endl;
+    //cout << "BPF sampling " << duration << " seconds" << endl;
     sleep(duration);
     if (out_perf!=NULL){
         writing_perf=true;
@@ -352,6 +415,29 @@ void PrintThread(){
     }
 
     fclose(out_thread);
+}
+void PrintTopMethods(int n){
+    //pid,kernel_ip,user_stack_id,kernel_stack_id
+    auto table = bpf.get_hash_table<method_key_t, uint64_t>("counts").get_table_offline();
+    sort( table.begin(), table.end(),
+      [](pair<method_key_t, uint64_t> a, pair<method_key_t, uint64_t> b) {
+        return a.second > b.second;
+      }
+    );
+    auto stacks = bpf.get_stack_table("stack_traces");
+    string method_name="";
+    int i=0;
+    fprintf(out_cpu, "samples\tstack_id\tkernel_id\tmethod_name\n");
+    for (auto it : table) {
+        if (++i>n) break;
+        if (it.first.kernel_stack_id >= 0) {
+            method_name = *stacks.get_stack_symbol(it.first.kernel_stack_id, -1).begin()+"[k]";
+        }else if(it.first.user_stack_id >= 0) {
+            method_name = *stacks.get_stack_symbol(it.first.user_stack_id, it.first.pid).begin();
+        }
+        fprintf(out_cpu, "%ld\t %d\t %d\t %s\n", it.second, it.first.user_stack_id, it.first.kernel_stack_id, method_name.c_str());
+    }
+    fclose(out_cpu);
 }
 void PrintFlame(){
     auto table = bpf.get_hash_table<stack_key_t, uint64_t>("counts").get_table_offline();
@@ -398,6 +484,9 @@ void PrintBPF(int id){
             PrintFlame();
 	    break;
         case 1:
+	    PrintTopMethods(TOP_N);
+	    break;
+        case 2:
             PrintThread();
 	    break;
     }
@@ -466,9 +555,14 @@ int do_single_options(string k, string v, jvmtiEnv* jvmti){
     }else if(k.compare("sample_cpu")==0){
         out_cpu = fopen(v.c_str(), "w");
         return 0;
+    }else if(k.compare("sample_method")==0){
+        out_cpu = fopen(v.c_str(), "w");
+        return 1;
     }else if(k.compare("sample_thread")==0){
         out_thread = fopen(v.c_str(), "w");
-        return 1;
+        return 2;
+    }else if(k.compare("top")==0){
+        TOP_N=stoi(v);
     }else if(k.compare("sample_mem")==0){
         registerMemoryCapa(jvmti);
         jvmti->SetHeapSamplingInterval(1024*1024); //1m
