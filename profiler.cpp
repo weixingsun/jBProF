@@ -342,12 +342,15 @@ void PrintThread(){
     );
     */
     //-1 unrunnable, 0 runnable, >0 stopped
-    //map.push
-    fprintf(out_thread, "pid\ttid\tstate\tcount\tname\n");
+    int total_samples = 0;
+    fprintf(out_thread, "pid\ttid\tcount\tpct\tname\n");
     for (auto it : table) {
-        //cout << "pid:" << it.first.pid << "	tid:" << it.first.tid << "	state:" << it.first.state << "	counts:" << it.second << "	name:" << it.first.name << endl;
-	fprintf(out_thread, "%d\t%d\t%ld\t%ld\t%s\n", it.first.pid,it.first.tid,it.first.state, it.second, it.first.name );
+	total_samples+=it.second;
     }
+    for (auto it : table) {
+	fprintf(out_thread, "%d\t%d\t%ld\t%0.2f\t%s\n", it.first.pid,it.first.tid,it.second, (float)100*it.second/total_samples, it.first.name );
+    }
+
     fclose(out_thread);
 }
 void PrintFlame(){

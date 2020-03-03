@@ -1,6 +1,5 @@
-pid	tid	state	count	name
-8292	8296	0	3	VM Thread
-8292	8295	0	930	ParGC Thread#1
-8292	8304	0	1	VM Periodic Tas
-8292	8294	0	914	ParGC Thread#0
-8292	8293	0	35	java
+pid	tid	count	pct	name
+8876	8880	8	0.52	VM Thread
+8876	8879	790	51.13	ParGC Thread#1
+8876	8877	5	0.32	java
+8876	8878	742	48.03	ParGC Thread#0
