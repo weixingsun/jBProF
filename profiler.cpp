@@ -24,8 +24,10 @@ static jlong start_time;
 static jrawMonitorID vmtrace_lock;
 static jvmtiEnv* jvmti = NULL;
 static jrawMonitorID tree_lock;
+
 static int TOP_N = 20;
-static int duration = 10;
+static int BPF_PERF_FREQ = 99;
+static int DURATION = 10;
 static ebpf::BPF bpf;
 static map<int,string> BPF_TXT_MAP;
 static map<int,string> BPF_FN_MAP;
@@ -362,7 +364,7 @@ bool str_replace(string& str, const string& from, const string& to) {
 }
 
 void StartBPF(int id) {
-    cout << "StartBPF(" << id << ")" << endl;
+    //cout << "StartBPF(" << id << ")" << endl;
     //ebpf::BPF bpf;
     int pid = getpid();
     const string PID = "(tgid=="+to_string(pid)+")";
@@ -375,18 +377,16 @@ void StartBPF(int id) {
     }
     int pid2=-1;
     string fn = get_prof_func(id);
-    int freq=99;
-    auto att_r = bpf.attach_perf_event(PERF_TYPE_SOFTWARE, PERF_COUNT_HW_CPU_CYCLES, fn, freq, 0, pid2);
+    auto att_r = bpf.attach_perf_event(PERF_TYPE_SOFTWARE, PERF_COUNT_HW_CPU_CYCLES, fn, BPF_PERF_FREQ, 0, pid2);
     if (att_r.code() != 0) {
         cerr << "failed to attach fn:" << fn <<  " pid:" << pid << " err:" << att_r.msg() << endl;
     }else{
         cout << "attached fn:"<<fn <<" to pid:" << pid << " perf event "<< endl;
     }
-    cout << "BPF sampling " << duration << " seconds" << endl;
+    cout << "BPF sampling " << DURATION << " seconds" << endl;
 }
 void StopBPF(){
-    //cout << "BPF sampling " << duration << " seconds" << endl;
-    sleep(duration);
+    sleep(DURATION);
     if (out_perf!=NULL){
         writing_perf=true;
         fclose(out_perf);
@@ -416,8 +416,14 @@ void PrintThread(){
 
     fclose(out_thread);
 }
+template <typename A, typename B> multimap<B, A> flip_map(map<A,B> & src) {
+    multimap<B,A> dst;
+    for(typename map<A, B>::const_iterator it = src.begin(); it != src.end(); ++it)
+        dst.insert(pair<B, A>(it -> second, it -> first));
+    return dst;
+}
 void PrintTopMethods(int n){
-    //pid,kernel_ip,user_stack_id,kernel_stack_id
+    //table: pid,kernel_ip,user_stack_id,kernel_stack_id
     auto table = bpf.get_hash_table<method_key_t, uint64_t>("counts").get_table_offline();
     sort( table.begin(), table.end(),
       [](pair<method_key_t, uint64_t> a, pair<method_key_t, uint64_t> b) {
@@ -426,16 +432,29 @@ void PrintTopMethods(int n){
     );
     auto stacks = bpf.get_stack_table("stack_traces");
     string method_name="";
-    int i=0;
-    fprintf(out_cpu, "samples\tstack_id\tkernel_id\tmethod_name\n");
+    //here is a workaround, there are many different stack_id map to same method, may caused by top stack missing bug
+    map<string, int> mout;
     for (auto it : table) {
-        if (++i>n) break;
         if (it.first.kernel_stack_id >= 0) {
             method_name = *stacks.get_stack_symbol(it.first.kernel_stack_id, -1).begin()+"[k]";
         }else if(it.first.user_stack_id >= 0) {
             method_name = *stacks.get_stack_symbol(it.first.user_stack_id, it.first.pid).begin();
         }
-        fprintf(out_cpu, "%ld\t %d\t %d\t %s\n", it.second, it.first.user_stack_id, it.first.kernel_stack_id, method_name.c_str());
+	auto p = mout.find(method_name);
+	if ( p==mout.end() ){
+	    mout.insert(pair<string,int>(method_name, (int)it.second));
+	}else{
+	    (*p).second += it.second;
+	}
+	if( mout.size() >n ) break;
+        //fprintf(out_cpu, "%ld\t %d\t %d\t %s\n", it.second, it.first.user_stack_id, it.first.kernel_stack_id, method_name.c_str());
+    }
+    fprintf(out_cpu, "samples\t method_name\n");
+    //here is a workaround, there are many different stack_id map to same method, may caused by top stack missing bug
+    multimap<int, string> rmap = flip_map(mout);
+    //for (auto it : rmap){
+    for (multimap<int,string>::const_reverse_iterator it = rmap.rbegin(); it!=rmap.rend(); ++it){
+        fprintf(out_cpu, "%d\t %s\n", it->first, it->second.c_str() );
     }
     fclose(out_cpu);
 }
@@ -551,7 +570,11 @@ void enableMemoryEvent(jvmtiEnv* jvmti){
 }
 int do_single_options(string k, string v, jvmtiEnv* jvmti){
     if (k.compare("duration") == 0){
-        duration=stoi(v);
+        DURATION=stoi(v);
+    }else if(k.compare("top")==0){
+        TOP_N=stoi(v);
+    }else if(k.compare("frequency")==0){
+        BPF_PERF_FREQ=stoi(v);
     }else if(k.compare("sample_cpu")==0){
         out_cpu = fopen(v.c_str(), "w");
         return 0;
@@ -561,8 +584,6 @@ int do_single_options(string k, string v, jvmtiEnv* jvmti){
     }else if(k.compare("sample_thread")==0){
         out_thread = fopen(v.c_str(), "w");
         return 2;
-    }else if(k.compare("top")==0){
-        TOP_N=stoi(v);
     }else if(k.compare("sample_mem")==0){
         registerMemoryCapa(jvmti);
         jvmti->SetHeapSamplingInterval(1024*1024); //1m
@@ -592,7 +613,7 @@ JNIEXPORT jint JNICALL Agent_OnLoad(JavaVM* vm, char* options, void* reserved) {
         for (string kv : vkv){
             string k = get_key(kv, "=");
             string v = get_value(kv, "=");
-            cout << "k=" << k << " v=" << v << endl;
+            cout << k << "=" << v << endl;
             int i = do_single_options(k,v,jvmti);
             if (i>-1) id=i;
         }

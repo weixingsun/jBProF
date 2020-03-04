@@ -52,6 +52,6 @@ if [ $? = 0 ]; then
     #run_with_agent $AGENT "duration=5;sample_mem=mem.log"
     #run_and_attach $AGENT "duration=3;sample_mem=mem.log;sample_cpu=cpu.log"
     #run_and_attach $AGENT "duration=3;sample_thread=thread.log"
-    run_and_attach $AGENT "duration=3;top=9;sample_method=method.log"
+    run_and_attach $AGENT "duration=3;top=9;frequency=49;sample_method=method.log"
     #./flamegraph.pl cpu.log > flame.svg
 fi
