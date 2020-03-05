@@ -432,12 +432,15 @@ void PrintTopMethods(int n){
     );
     auto stacks = bpf.get_stack_table("stack_traces");
     string method_name="";
+    uintptr_t method_addr=0;
     //here is a workaround, there are many different stack_id map to same method, may caused by top stack missing bug
     map<string, int> mout;
     for (auto it : table) {
         if (it.first.kernel_stack_id >= 0) {
+            method_addr = *stacks.get_stack_addr(it.first.kernel_stack_id).begin();
             method_name = *stacks.get_stack_symbol(it.first.kernel_stack_id, -1).begin()+"[k]";
         }else if(it.first.user_stack_id >= 0) {
+            method_addr = *stacks.get_stack_addr(it.first.user_stack_id).begin();
             method_name = *stacks.get_stack_symbol(it.first.user_stack_id, it.first.pid).begin();
         }
 	auto p = mout.find(method_name);
@@ -448,6 +451,7 @@ void PrintTopMethods(int n){
 	}
 	if( mout.size() >n ) break;
         //fprintf(out_cpu, "%ld\t %d\t %d\t %s\n", it.second, it.first.user_stack_id, it.first.kernel_stack_id, method_name.c_str());
+        fprintf(out_cpu, "%ld\t %d\t %d\t %lx\t %s\n", it.second, it.first.user_stack_id, it.first.kernel_stack_id, method_addr, method_name.c_str());
     }
     fprintf(out_cpu, "samples\t method_name\n");
     //here is a workaround, there are many different stack_id map to same method, may caused by top stack missing bug
@@ -603,6 +607,7 @@ void InitFile() {
     out_perf = fopen(path.c_str(),"w");
 }
 JNIEXPORT jint JNICALL Agent_OnLoad(JavaVM* vm, char* options, void* reserved) {
+    cout << "|***************************************|"<< endl;
     InitFile();
     genbpftextmap();
     vm->GetEnv((void**) &jvmti, JVMTI_VERSION_1_0);
@@ -618,6 +623,7 @@ JNIEXPORT jint JNICALL Agent_OnLoad(JavaVM* vm, char* options, void* reserved) {
             if (i>-1) id=i;
         }
     }
+    cout << "|***************************************|"<< endl;
     StartBPF(id);
     StopBPF();
     PrintBPF(id);
