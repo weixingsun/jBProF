@@ -11,6 +11,8 @@
 #include <unistd.h>
 #include <bcc/BPF.h>
 #include <jvmti.h>
+#include <linux/perf_event.h>
+#include <linux/hw_breakpoint.h>
 
 using namespace std;
 
@@ -31,8 +33,6 @@ static int DURATION = 10;
 static ebpf::BPF bpf;
 static map<int,string> BPF_TXT_MAP;
 static map<int,string> BPF_FN_MAP;
-static int PERF_TYPE_SOFTWARE = 1;
-static int PERF_COUNT_HW_CPU_CYCLES = 0;
 
 struct Frame {
     jlong samples;
@@ -363,6 +363,35 @@ bool str_replace(string& str, const string& from, const string& to) {
     return true;
 }
 
+//(0x7c00000, TYPE, "do_count","rwx")
+//TYPE: BPF_PROBE_ENTRY, BPF_PROBE_RETURN
+void AttachBreakPoint(uint64_t addr, const string& fn, const string& mode){
+    struct perf_event_attr attr = {};
+    attr.type = PERF_TYPE_BREAKPOINT;
+    attr.size = sizeof(struct perf_event_attr);
+    attr.config = 0;
+
+    attr.bp_type = HW_BREAKPOINT_EMPTY;
+    for (const char c : mode) {
+        if (c == 'r')
+            attr.bp_type |= HW_BREAKPOINT_R;
+        else if (c == 'w')
+            attr.bp_type |= HW_BREAKPOINT_W;
+        else if (c == 'x')
+            attr.bp_type |= HW_BREAKPOINT_X;
+    }
+
+    attr.bp_addr = addr;
+    attr.bp_len = 8;
+    attr.sample_period = 1;    // Trigger for every event
+    int pid=-1;
+    int cpu=-1;
+    int group=-1;
+    auto att_r = bpf.attach_perf_event_raw(&attr,fn,pid,cpu,group);
+    if(att_r.code()!=0){
+        cerr << att_r.msg() << endl;
+    }
+}
 void StartBPF(int id) {
     //cout << "StartBPF(" << id << ")" << endl;
     //ebpf::BPF bpf;
@@ -453,6 +482,10 @@ void PrintTopMethods(int n){
         //fprintf(out_cpu, "%ld\t %d\t %d\t %s\n", it.second, it.first.user_stack_id, it.first.kernel_stack_id, method_name.c_str());
         fprintf(out_cpu, "%ld\t %d\t %d\t %lx\t %s\n", it.second, it.first.user_stack_id, it.first.kernel_stack_id, method_addr, method_name.c_str());
     }
+    AttachBreakPoint(method_addr, "do_breakpoint", "rwx");
+    
+
+
     fprintf(out_cpu, "samples\t method_name\n");
     //here is a workaround, there are many different stack_id map to same method, may caused by top stack missing bug
     multimap<int, string> rmap = flip_map(mout);
