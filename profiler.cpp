@@ -41,6 +41,13 @@ struct Frame {
 };
 static map<string, Frame> root;
 
+struct method_type {
+    uint64_t    addr;
+    string      name;
+    bool operator<(const method_type &m) const{
+        return addr < m.addr;
+    }
+};
 //for flame generation
 struct stack_key_t {
   int pid;
@@ -50,14 +57,19 @@ struct stack_key_t {
   int kernel_stack_id;
   char name[16];
 };
-//for method generation
+//for top method 
 struct method_key_t {
   int pid;
   uint64_t kernel_ip;
   int user_stack_id;
   int kernel_stack_id;
 };
-//for thread generation
+//for method latency
+struct latency_key_t {
+  uint64_t addr;
+
+};
+//for thread sampling
 struct thread_key_t {
     int pid;
     int tid;
@@ -175,7 +187,16 @@ struct method_key_t {
 };
 BPF_HASH(counts, struct method_key_t);
 BPF_STACK_TRACE(stack_traces, 16384);
+BPF_ARRAY(top_counter, u64, 1);
 
+static void incr(int idx) {
+    u64 *ptr = top_counter.lookup(&idx);
+    if (ptr) ++(*ptr);
+}
+int do_breakpoint(struct bpf_perf_event_data *ctx){
+    incr(0);
+    return 0;
+}
 int do_perf_event_method(struct bpf_perf_event_data *ctx) {
     u64 id = bpf_get_current_pid_tgid();
     u32 tgid = id >> 32;
@@ -363,34 +384,30 @@ bool str_replace(string& str, const string& from, const string& to) {
     return true;
 }
 
-//(0x7c00000, TYPE, "do_count","rwx")
-//TYPE: BPF_PROBE_ENTRY, BPF_PROBE_RETURN
-void AttachBreakPoint(uint64_t addr, const string& fn, const string& mode){
+void DetachBreakPoint(struct perf_event_attr* attr){
+    bpf.detach_perf_event_raw(attr);
+}
+//PROBE.TYPE: BPF_PROBE_ENTRY, BPF_PROBE_RETURN
+perf_event_attr AttachBreakPoint(struct method_type method, const string& fn){
+    fprintf(stdout, "attach to breakpoint: addr=%lx method=%s fn=%s \n", method.addr, method.name.c_str(), fn.c_str() );
     struct perf_event_attr attr = {};
     attr.type = PERF_TYPE_BREAKPOINT;
+    attr.bp_len = sizeof(long); //for exec
     attr.size = sizeof(struct perf_event_attr);
+    attr.bp_addr = method.addr;
     attr.config = 0;
-
     attr.bp_type = HW_BREAKPOINT_EMPTY;
-    for (const char c : mode) {
-        if (c == 'r')
-            attr.bp_type |= HW_BREAKPOINT_R;
-        else if (c == 'w')
-            attr.bp_type |= HW_BREAKPOINT_W;
-        else if (c == 'x')
-            attr.bp_type |= HW_BREAKPOINT_X;
-    }
-
-    attr.bp_addr = addr;
-    attr.bp_len = 8;
+    attr.bp_type |= HW_BREAKPOINT_X;  //HW_BREAKPOINT_R/HW_BREAKPOINT_W conflict with HW_BREAKPOINT_X
     attr.sample_period = 1;    // Trigger for every event
+    attr.precise_ip = 2;	//request sync delivery
+    attr.wakeup_events = 1;
+    //attr.inherit = 1;
     int pid=-1;
     int cpu=-1;
     int group=-1;
     auto att_r = bpf.attach_perf_event_raw(&attr,fn,pid,cpu,group);
-    if(att_r.code()!=0){
-        cerr << att_r.msg() << endl;
-    }
+    if(att_r.code()!=0) cerr << att_r.msg() << endl;
+    return attr;
 }
 void StartBPF(int id) {
     //cout << "StartBPF(" << id << ")" << endl;
@@ -451,20 +468,26 @@ template <typename A, typename B> multimap<B, A> flip_map(map<A,B> & src) {
         dst.insert(pair<B, A>(it -> second, it -> first));
     return dst;
 }
+void PrintTopMethodCount(){
+    auto cnt = bpf.get_array_table<unsigned long long>("top_counter");
+    ebpf::StatusTuple res(0);
+    int key=0;
+    unsigned long long value=0;
+    res = cnt.get_value(key, value);
+    cout<<"key="<<key<<"  value="<<value<<endl;
+}
 void PrintTopMethods(int n){
-    //table: pid,kernel_ip,user_stack_id,kernel_stack_id
     auto table = bpf.get_hash_table<method_key_t, uint64_t>("counts").get_table_offline();
+    auto stacks = bpf.get_stack_table("stack_traces");
     sort( table.begin(), table.end(),
       [](pair<method_key_t, uint64_t> a, pair<method_key_t, uint64_t> b) {
         return a.second > b.second;
       }
     );
-    auto stacks = bpf.get_stack_table("stack_traces");
-    string method_name="";
-    uintptr_t method_addr=0;
-    //here is a workaround, there are many different stack_id map to same method, may caused by top stack missing bug
-    map<string, int> mout;
+    map<method_type, int> mout;
     for (auto it : table) {
+        uint64_t method_addr;
+	string   method_name;
         if (it.first.kernel_stack_id >= 0) {
             method_addr = *stacks.get_stack_addr(it.first.kernel_stack_id).begin();
             method_name = *stacks.get_stack_symbol(it.first.kernel_stack_id, -1).begin()+"[k]";
@@ -472,27 +495,33 @@ void PrintTopMethods(int n){
             method_addr = *stacks.get_stack_addr(it.first.user_stack_id).begin();
             method_name = *stacks.get_stack_symbol(it.first.user_stack_id, it.first.pid).begin();
         }
-	auto p = mout.find(method_name);
+        struct method_type method = {.addr=method_addr, .name=method_name};
+	auto p = mout.find(method);
 	if ( p==mout.end() ){
-	    mout.insert(pair<string,int>(method_name, (int)it.second));
+	    mout.insert(pair<method_type,int>(method, (int)it.second));
 	}else{
-	    (*p).second += it.second;
+	    (*p).second += it.second;    //merge_method from different callers
 	}
 	if( mout.size() >n ) break;
         //fprintf(out_cpu, "%ld\t %d\t %d\t %s\n", it.second, it.first.user_stack_id, it.first.kernel_stack_id, method_name.c_str());
-        fprintf(out_cpu, "%ld\t %d\t %d\t %lx\t %s\n", it.second, it.first.user_stack_id, it.first.kernel_stack_id, method_addr, method_name.c_str());
+        //fprintf(out_cpu, "%ld\t %d\t %d\t %lx\t %s\n", it.second, it.first.user_stack_id, it.first.kernel_stack_id, method_addr, method_name.c_str());
     }
-    AttachBreakPoint(method_addr, "do_breakpoint", "rwx");
-    
+    fprintf(out_cpu, "samples\t method_addr\t method_name\n");
+    multimap<int, method_type> rmap = flip_map(mout);
 
-
-    fprintf(out_cpu, "samples\t method_name\n");
-    //here is a workaround, there are many different stack_id map to same method, may caused by top stack missing bug
-    multimap<int, string> rmap = flip_map(mout);
-    //for (auto it : rmap){
-    for (multimap<int,string>::const_reverse_iterator it = rmap.rbegin(); it!=rmap.rend(); ++it){
-        fprintf(out_cpu, "%d\t %s\n", it->first, it->second.c_str() );
+    struct method_type method={};
+    for (multimap<int,method_type>::const_reverse_iterator it = rmap.rbegin(); it!=rmap.rend(); ++it){
+        fprintf(out_cpu, "%d\t %lx\t %s\n", it->first, it->second.addr, it->second.name.c_str() );
+	if(method.addr==0){
+		method.addr=it->second.addr;
+		method.name=it->second.name;
+	}
     }
+    auto attr = AttachBreakPoint(method, "do_breakpoint");
+    cout<<"sampling for 1 second"<<endl;
+    sleep(1);
+    DetachBreakPoint(&attr);
+    PrintTopMethodCount();
     fclose(out_cpu);
 }
 void PrintFlame(){
