@@ -27,9 +27,11 @@ static jrawMonitorID vmtrace_lock;
 static jvmtiEnv* jvmti = NULL;
 static jrawMonitorID tree_lock;
 
-static int TOP_N = 20;
-static int BPF_PERF_FREQ = 99;
+static int SAMPLE_TOP_N = 20;
+static int MON_TOP_N = 0;
+static int BPF_PERF_FREQ = 49;
 static int DURATION = 10;
+static int MON_DURATION = 5;
 static ebpf::BPF bpf;
 static map<int,string> BPF_TXT_MAP;
 static map<int,string> BPF_FN_MAP;
@@ -384,9 +386,6 @@ bool str_replace(string& str, const string& from, const string& to) {
     return true;
 }
 
-void DetachBreakPoint(struct perf_event_attr* attr){
-    bpf.detach_perf_event_raw(attr);
-}
 //PROBE.TYPE: BPF_PROBE_ENTRY, BPF_PROBE_RETURN
 perf_event_attr AttachBreakPoint(struct method_type method, const string& fn){
     fprintf(stdout, "attach to breakpoint: addr=%lx method=%s fn=%s \n", method.addr, method.name.c_str(), fn.c_str() );
@@ -468,15 +467,39 @@ template <typename A, typename B> multimap<B, A> flip_map(map<A,B> & src) {
         dst.insert(pair<B, A>(it -> second, it -> first));
     return dst;
 }
-void PrintTopMethodCount(struct method_type method){
+void PrintTopMethodCount(multimap<int, method_type> method_map, int n){
     auto cnt = bpf.get_array_table<unsigned long long>("top_counter");
     ebpf::StatusTuple res(0);
     int key=0;
     unsigned long long value=0;
-    res = cnt.get_value(key, value);
-    //cout<<"key="<<key<<"  value="<<value<<endl;
     fprintf(out_cpu, "Monitoring Methods for 1 second:\ncount\t method_addr\t method_name\n");
-    fprintf(out_cpu, "%llu\t %lx\t %s\n", value, method.addr, method.name.c_str() );
+    //for (auto it : method_map){
+    for (multimap<int,method_type>::const_reverse_iterator it = method_map.rbegin(); it!=method_map.rend(); ++it){
+        if (key>n-1) break;
+        res = cnt.get_value(key, value);
+        fprintf(out_cpu, "%llu\t %lx\t %s\n", value, it->second.addr, it->second.name.c_str() );
+	key++;
+    }
+}
+void DetachBreakPoint(struct perf_event_attr* attr){
+    bpf.detach_perf_event_raw(attr);
+}
+void MonitorMethods(multimap<int, method_type> method_map, int n){
+    int i = 0;
+    perf_event_attr peas[n];
+    //for(auto it : method_map){
+    for (multimap<int,method_type>::const_reverse_iterator it = method_map.rbegin(); it!=method_map.rend(); ++it){
+        if (i>n-1) break;
+        peas[i]=AttachBreakPoint(it->second, "do_breakpoint");
+        i++;
+    }
+    cout<<"sampling for "<<MON_DURATION<<" second"<<endl;
+    sleep(MON_DURATION);
+
+    for (perf_event_attr attr : peas){
+        DetachBreakPoint(&attr);
+    }
+    PrintTopMethodCount(method_map,n);
 }
 void PrintTopMethods(int n){
     auto table = bpf.get_hash_table<method_key_t, uint64_t>("counts").get_table_offline();
@@ -511,19 +534,12 @@ void PrintTopMethods(int n){
     fprintf(out_cpu, "samples\t method_addr\t method_name\n");
     multimap<int, method_type> rmap = flip_map(mout);
 
-    struct method_type method={};
     for (multimap<int,method_type>::const_reverse_iterator it = rmap.rbegin(); it!=rmap.rend(); ++it){
         fprintf(out_cpu, "%d\t %lx\t %s\n", it->first, it->second.addr, it->second.name.c_str() );
-	if(method.addr==0){
-		method.addr=it->second.addr;
-		method.name=it->second.name;
-	}
     }
-    auto attr = AttachBreakPoint(method, "do_breakpoint");
-    cout<<"sampling for 1 second"<<endl;
-    sleep(1);
-    DetachBreakPoint(&attr);
-    PrintTopMethodCount(method);
+    if(MON_TOP_N>0){
+        MonitorMethods(rmap, MON_TOP_N);
+    }
     fclose(out_cpu);
 }
 void PrintFlame(){
@@ -571,7 +587,7 @@ void PrintBPF(int id){
             PrintFlame();
 	    break;
         case 1:
-	    PrintTopMethods(TOP_N);
+	    PrintTopMethods(SAMPLE_TOP_N);
 	    break;
         case 2:
             PrintThread();
@@ -637,12 +653,16 @@ void enableMemoryEvent(jvmtiEnv* jvmti){
     jvmti->GenerateEvents(JVMTI_EVENT_COMPILED_METHOD_LOAD);
 }
 int do_single_options(string k, string v, jvmtiEnv* jvmti){
-    if (k.compare("duration") == 0){
+    if (k.compare("sample_duration") == 0){
         DURATION=stoi(v);
-    }else if(k.compare("top")==0){
-        TOP_N=stoi(v);
+    }else if(k.compare("monitor_duration")==0){
+        MON_DURATION=stoi(v);
     }else if(k.compare("frequency")==0){
         BPF_PERF_FREQ=stoi(v);
+    }else if(k.compare("sample_top")==0){
+        SAMPLE_TOP_N=stoi(v);
+    }else if(k.compare("monitor_top")==0){
+        MON_TOP_N=stoi(v);
     }else if(k.compare("sample_cpu")==0){
         out_cpu = fopen(v.c_str(), "w");
         return 0;
@@ -692,6 +712,7 @@ JNIEXPORT jint JNICALL Agent_OnLoad(JavaVM* vm, char* options, void* reserved) {
     StopBPF();
     PrintBPF(id);
     fclose(out_mem);
+    cout << "Done."<< endl;
     return 0;
 }
 
