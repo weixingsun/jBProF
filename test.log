@@ -1,0 +1,13 @@
+build done
+|***************************************|
+perf map: /tmp/perf-5665.map
+duration=3
+top=9
+frequency=49
+sample_method=method.log
+|***************************************|
+attached fn:do_perf_event_method to pid:5665 perf event 
+BPF sampling 3 seconds
+attach to breakpoint: addr=7fd1f78aa1f1 method=ParCompactionManager::follow_marking_stacks() fn=do_breakpoint 
+sampling for 1 second
+Done.

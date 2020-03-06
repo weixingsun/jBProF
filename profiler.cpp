@@ -468,13 +468,15 @@ template <typename A, typename B> multimap<B, A> flip_map(map<A,B> & src) {
         dst.insert(pair<B, A>(it -> second, it -> first));
     return dst;
 }
-void PrintTopMethodCount(){
+void PrintTopMethodCount(struct method_type method){
     auto cnt = bpf.get_array_table<unsigned long long>("top_counter");
     ebpf::StatusTuple res(0);
     int key=0;
     unsigned long long value=0;
     res = cnt.get_value(key, value);
-    cout<<"key="<<key<<"  value="<<value<<endl;
+    //cout<<"key="<<key<<"  value="<<value<<endl;
+    fprintf(out_cpu, "Monitoring Methods for 1 second:\ncount\t method_addr\t method_name\n");
+    fprintf(out_cpu, "%llu\t %lx\t %s\n", value, method.addr, method.name.c_str() );
 }
 void PrintTopMethods(int n){
     auto table = bpf.get_hash_table<method_key_t, uint64_t>("counts").get_table_offline();
@@ -521,7 +523,7 @@ void PrintTopMethods(int n){
     cout<<"sampling for 1 second"<<endl;
     sleep(1);
     DetachBreakPoint(&attr);
-    PrintTopMethodCount();
+    PrintTopMethodCount(method);
     fclose(out_cpu);
 }
 void PrintFlame(){
