@@ -1,6 +1,7 @@
 
 AGENT=profiler.so
 rm -rf $AGENT log thread.log cpu.log mem.log hs_err* jcmd.log /tmp/perf*  #flame.svg
+pkill java
 LOOP=3000000
 JIT="-Xmx300m -Xms300m -XX:+UseParallelOldGC -XX:ParallelGCThreads=1 -XX:+PreserveFramePointer"
 
@@ -56,5 +57,5 @@ if [ $? = 0 ]; then
     #run_and_attach $AGENT "sample_duration=3;frequency=49;sample_thread=thread.log"
 
     #run_and_attach $AGENT "sample_duration=3;sample_top=9;sample_method=method.log"
-    run_and_attach $AGENT "sample_duration=3;sample_top=9;sample_method=method.log;monitor_duration=1;monitor_top=2"
+    run_and_attach $AGENT "sample_duration=3;sample_top=9;sample_method=method.log;monitor_duration=1;monitor_top=4"
 fi

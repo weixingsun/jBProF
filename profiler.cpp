@@ -189,16 +189,20 @@ struct method_key_t {
 };
 BPF_HASH(counts, struct method_key_t);
 BPF_STACK_TRACE(stack_traces, 16384);
-BPF_ARRAY(top_counter, u64, 1);
+//BPF_ARRAY(top_counter, int, 16);
+BPF_TABLE("array", int, int, top_counter, 16);
 
-static void incr(int idx) {
-    u64 *ptr = top_counter.lookup(&idx);
+static int incr(int idx) {
+    int *ptr = top_counter.lookup(&idx);
     if (ptr) ++(*ptr);
-}
-int do_breakpoint(struct bpf_perf_event_data *ctx){
-    incr(0);
     return 0;
 }
+//struct bpf_perf_event_data *ctx
+int do_bp_count0(void *ctx){ return incr(0);}
+int do_bp_count1(void *ctx){ return incr(1);}
+int do_bp_count2(void *ctx){ return incr(2);}
+int do_bp_count3(void *ctx){ return incr(3);}
+
 int do_perf_event_method(struct bpf_perf_event_data *ctx) {
     u64 id = bpf_get_current_pid_tgid();
     u32 tgid = id >> 32;
@@ -387,14 +391,16 @@ bool str_replace(string& str, const string& from, const string& to) {
 }
 
 //PROBE.TYPE: BPF_PROBE_ENTRY, BPF_PROBE_RETURN
-perf_event_attr AttachBreakPoint(struct method_type method, const string& fn){
-    fprintf(stdout, "attach to breakpoint: addr=%lx method=%s fn=%s \n", method.addr, method.name.c_str(), fn.c_str() );
+perf_event_attr AttachBreakPoint(struct method_type method, const string& fn, int seq){
+    string fn_seq = fn+to_string(seq);
+    fprintf(stdout, "attach to breakpoint: addr=%lx method=%s fn=%s \n", method.addr, method.name.c_str(), fn_seq.c_str() );
     struct perf_event_attr attr = {};
     attr.type = PERF_TYPE_BREAKPOINT;
-    attr.bp_len = sizeof(long); //for exec
+    attr.bp_len = HW_BREAKPOINT_LEN_8; //for exec
     attr.size = sizeof(struct perf_event_attr);
     attr.bp_addr = method.addr;
-    attr.config = 0;
+    //attr.config = 0;
+    attr.config = seq;
     attr.bp_type = HW_BREAKPOINT_EMPTY;
     attr.bp_type |= HW_BREAKPOINT_X;  //HW_BREAKPOINT_R/HW_BREAKPOINT_W conflict with HW_BREAKPOINT_X
     attr.sample_period = 1;    // Trigger for every event
@@ -404,7 +410,7 @@ perf_event_attr AttachBreakPoint(struct method_type method, const string& fn){
     int pid=-1;
     int cpu=-1;
     int group=-1;
-    auto att_r = bpf.attach_perf_event_raw(&attr,fn,pid,cpu,group);
+    auto att_r = bpf.attach_perf_event_raw(&attr,fn_seq,pid,cpu,group);
     if(att_r.code()!=0) cerr << att_r.msg() << endl;
     return attr;
 }
@@ -467,31 +473,28 @@ template <typename A, typename B> multimap<B, A> flip_map(map<A,B> & src) {
         dst.insert(pair<B, A>(it -> second, it -> first));
     return dst;
 }
-void PrintTopMethodCount(multimap<int, method_type> method_map, int n){
-    auto cnt = bpf.get_array_table<unsigned long long>("top_counter");
+void PrintTopMethodCount(method_type methods[], int n){
+    //auto cnt = bpf.get_array_table<unsigned long long>("top_counter");
+    ebpf::BPFArrayTable<int> cnt = bpf.get_array_table<int>("top_counter");
     ebpf::StatusTuple res(0);
-    int key=0;
-    unsigned long long value=0;
-    fprintf(out_cpu, "Monitoring Methods for 1 second:\ncount\t method_addr\t method_name\n");
-    //for (auto it : method_map){
-    for (multimap<int,method_type>::const_reverse_iterator it = method_map.rbegin(); it!=method_map.rend(); ++it){
-        if (key>n-1) break;
-        res = cnt.get_value(key, value);
-        fprintf(out_cpu, "%llu\t %lx\t %s\n", value, it->second.addr, it->second.name.c_str() );
-	key++;
+    fprintf(out_cpu, "Monitoring Methods:\ncount\t method_addr\t method_name\n");
+    for (int i=0; i<n; i++){
+        if (i>n+1) break;
+        int value;
+        res = cnt.get_value(i, value);
+	if (res.code()!=0) cerr<<res.msg()<<endl;
+	else fprintf(out_cpu, "%d\t %lx\t %s\n", value, methods[i].addr, methods[i].name.c_str() );
     }
 }
 void DetachBreakPoint(struct perf_event_attr* attr){
+    cout<<"detached bp"<<endl;
     bpf.detach_perf_event_raw(attr);
 }
-void MonitorMethods(multimap<int, method_type> method_map, int n){
-    int i = 0;
+void MonitorMethods(method_type methods[], int n){
     perf_event_attr peas[n];
-    //for(auto it : method_map){
-    for (multimap<int,method_type>::const_reverse_iterator it = method_map.rbegin(); it!=method_map.rend(); ++it){
+    for (int i=0; i<n; i++){
         if (i>n-1) break;
-        peas[i]=AttachBreakPoint(it->second, "do_breakpoint");
-        i++;
+        peas[i]=AttachBreakPoint(methods[i], "do_bp_count", i);
     }
     cout<<"sampling for "<<MON_DURATION<<" second"<<endl;
     sleep(MON_DURATION);
@@ -499,7 +502,7 @@ void MonitorMethods(multimap<int, method_type> method_map, int n){
     for (perf_event_attr attr : peas){
         DetachBreakPoint(&attr);
     }
-    PrintTopMethodCount(method_map,n);
+    PrintTopMethodCount(methods,n);
 }
 void PrintTopMethods(int n){
     auto table = bpf.get_hash_table<method_key_t, uint64_t>("counts").get_table_offline();
@@ -532,13 +535,18 @@ void PrintTopMethods(int n){
         //fprintf(out_cpu, "%ld\t %d\t %d\t %lx\t %s\n", it.second, it.first.user_stack_id, it.first.kernel_stack_id, method_addr, method_name.c_str());
     }
     fprintf(out_cpu, "samples\t method_addr\t method_name\n");
-    multimap<int, method_type> rmap = flip_map(mout);
 
+    cout<<"flip method map..."<<endl;
+    multimap<int, method_type> rmap = flip_map(mout);
+    int i=0;
+    method_type methods[n];
     for (multimap<int,method_type>::const_reverse_iterator it = rmap.rbegin(); it!=rmap.rend(); ++it){
         fprintf(out_cpu, "%d\t %lx\t %s\n", it->first, it->second.addr, it->second.name.c_str() );
+	methods[i++]=it->second;
     }
     if(MON_TOP_N>0){
-        MonitorMethods(rmap, MON_TOP_N);
+        cout<<"start monitoring..."<<endl;
+        MonitorMethods(methods, MON_TOP_N);
     }
     fclose(out_cpu);
 }
