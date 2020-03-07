@@ -1,9 +1,31 @@
 # jvm eBPF profiler
 
-I need a tool for low overhead, robust, accurate, so now I can generate cpu flame from it.
+A profiling tool of low overhead, robust, accurate, so I wrote it.
+
+Features:
+
+Agent:   java -agentpath:./profiler.so=$OPTS
+
+Attach:  jcmd $pid JVMTI.agent_load ./profiler.so $OPTS
+
+WHERE $OPTS equals to:
+
+1.Flamegraph:
+
+    "sample_duration=5;sample_mem=mem.log"
+    "sample_duration=3;frequency=49;sample_cpu=cpu.log"
+    ./flamegraph.pl cpu.log > flame.svg
+
+2.Thread Sampling:
+    "sample_duration=3;frequency=49;sample_thread=thread.log"
+
+3.Method Sampling:
+    "sample_duration=3;sample_top=9;sample_method=method.log"
+    "sample_duration=3;sample_top=9;sample_method=method.log;monitor_duration=1;monitor_top=4"
+
 
 Install:
-apt-get -y install bison build-essential cmake flex git libedit-dev \
-  libllvm6.0 llvm-6.0-dev libclang-6.0-dev python zlib1g-dev libelf-dev
-and set variables as in run.sh
-origin url: https://github.com/weixingsun/perf_tuning_results
+1.install BCC & dependencies
+2.install clang
+3.install JDK (13 tested)
+4.run.sh
