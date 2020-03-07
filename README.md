@@ -1,6 +1,6 @@
 # JVM eBPF profiler
 
-A profiling tool of low overhead, robust, accurate, so I wrote it.
+A profiling tool of low overhead, robust, accurate
 
 Features:
 
@@ -12,7 +12,6 @@ WHERE $OPTS equals to:
 
 1.Flamegraph:
 
-    "sample_duration=5;sample_mem=mem.log"
     "sample_duration=3;frequency=49;sample_cpu=cpu.log"
     ./flamegraph.pl cpu.log > flame.svg
 
