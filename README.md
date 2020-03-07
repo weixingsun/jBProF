@@ -1,4 +1,4 @@
-# jvm eBPF profiler
+# JVM eBPF profiler
 
 A profiling tool of low overhead, robust, accurate, so I wrote it.
 
@@ -17,14 +17,17 @@ WHERE $OPTS equals to:
     ./flamegraph.pl cpu.log > flame.svg
 
 2.Thread Sampling:
+
     "sample_duration=3;frequency=49;sample_thread=thread.log"
 
 3.Method Sampling:
+
     "sample_duration=3;sample_top=9;sample_method=method.log"
     "sample_duration=3;sample_top=9;sample_method=method.log;monitor_duration=1;monitor_top=4"
 
 
 Install:
+
 1.install BCC & dependencies
 2.install clang
 3.install JDK (13 tested)
