@@ -1,6 +1,6 @@
 # JVM eBPF profiler
 
-A profiling tool of low overhead, robust, accurate
+A JVM profiling tool on linux: low overhead, robust, accurate
 
 Features:
 
