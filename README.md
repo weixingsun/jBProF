@@ -28,8 +28,9 @@ WHERE $OPTS equals to:
 3.Method Sampling: [method.log](https://github.com/weixingsun/jBProF/blob/master/method.log)
 
     "sample_duration=3;sample_top=9;sample_method=method.log"
-    "sample_duration=3;sample_top=9;sample_method=method.log;monitor_duration=1;monitor_top=4"
+    "sample_duration=3;sample_top=9;sample_method=method.log;monitor_duration=1;monitor_top=3"
     
+    Sampling top methods for 3 seconds:
     samples	 method_addr	 method_name
     240 	 7f01f15631f1	 ParCompactionManager::follow_marking_stacks()
     236 	 7f01f150d3f8	 ParMarkBitMap::mark_obj(HeapWordImpl**, unsigned long)
@@ -39,7 +40,7 @@ WHERE $OPTS equals to:
     26  	 7f01f156c282	 UpdateOnlyClosure::do_addr(HeapWordImpl**, unsigned long)
     24  	 7f01f150d470	 ParMarkBitMap::mark_obj(HeapWordImpl**, unsigned long)
     17  	 7f01f15641d8	 ParCompactionManager::follow_contents(oopDesc*)
-    Monitoring Top Methods:
+    Monitoring Top Methods for 1 second:
     count	 method_addr	 method_name
     89285	 7f01f15631f1	 ParCompactionManager::follow_marking_stacks()
     89493	 7f01f150d3f8	 ParMarkBitMap::mark_obj(HeapWordImpl**, unsigned long)
