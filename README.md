@@ -32,13 +32,13 @@ WHERE $OPTS equals to:
     
     samples	 method_addr	 method_name
     240 	 7f01f15631f1	 ParCompactionManager::follow_marking_stacks()
-    236		 7f01f150d3f8	 ParMarkBitMap::mark_obj(HeapWordImpl**, unsigned long)
-    204		 7f01f156c9e5	 ParallelCompactData::add_obj(HeapWordImpl**, unsigned long)
-    203		 7f01f150d458	 ParMarkBitMap::mark_obj(HeapWordImpl**, unsigned long)
-    42		 7f01f15633e8	 ParCompactionManager::follow_marking_stacks()
-    26		 7f01f156c282	 UpdateOnlyClosure::do_addr(HeapWordImpl**, unsigned long)
-    24		 7f01f150d470	 ParMarkBitMap::mark_obj(HeapWordImpl**, unsigned long)
-    17		 7f01f15641d8	 ParCompactionManager::follow_contents(oopDesc*)
+    236 	 7f01f150d3f8	 ParMarkBitMap::mark_obj(HeapWordImpl**, unsigned long)
+    204 	 7f01f156c9e5	 ParallelCompactData::add_obj(HeapWordImpl**, unsigned long)
+    203 	 7f01f150d458	 ParMarkBitMap::mark_obj(HeapWordImpl**, unsigned long)
+    42   	 7f01f15633e8	 ParCompactionManager::follow_marking_stacks()
+    26  	 7f01f156c282	 UpdateOnlyClosure::do_addr(HeapWordImpl**, unsigned long)
+    24  	 7f01f150d470	 ParMarkBitMap::mark_obj(HeapWordImpl**, unsigned long)
+    17  	 7f01f15641d8	 ParCompactionManager::follow_contents(oopDesc*)
     Monitoring Top Methods:
     count	 method_addr	 method_name
     89285	 7f01f15631f1	 ParCompactionManager::follow_marking_stacks()
