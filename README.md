@@ -1,14 +1,15 @@
 # JVM eBPF profiler
 
-A JVM profiling tool on linux: low overhead, robust, accurate
+    JVM profiling tool on linux: low overhead, robust, accurate. 
+    Consistent with perf top/record
+    Automatically resolve symbols
 
-Features:
+Features: 
 
-Agent:   java -agentpath:./profiler.so=$OPTS
-
-Attach:  jcmd $pid JVMTI.agent_load ./profiler.so $OPTS
-
-WHERE $OPTS equals to:
+    Agent:   java -agentpath:./profiler.so=$OPTS
+    Attach:  jcmd $pid JVMTI.agent_load ./profiler.so $OPTS
+    
+    WHERE $OPTS equals to:
 
 1.Flamegraph: [flame.svg](https://github.com/weixingsun/jBProF/blob/master/flame.svg)
 
