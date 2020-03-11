@@ -20,7 +20,7 @@ using namespace std;
 static bool writing_perf = false;
 static FILE* out_cpu;
 static FILE* out_thread;
-static FILE* out_mem;
+//static FILE* out_mem;
 static FILE* out_perf;
 static jlong start_time;
 static jrawMonitorID vmtrace_lock;
@@ -32,6 +32,7 @@ static int MON_TOP_N = 0;
 static int BPF_PERF_FREQ = 49;
 static int DURATION = 10;
 static int MON_DURATION = 5;
+static int BP_SEQ = 1;
 static ebpf::BPF bpf;
 static map<int,string> BPF_TXT_MAP;
 static map<int,string> BPF_FN_MAP;
@@ -45,6 +46,7 @@ static map<string, Frame> root;
 
 struct method_type {
     uint64_t    addr;
+    uint64_t    ret;
     string      name;
     bool operator<(const method_type &m) const{
         return addr < m.addr;
@@ -65,6 +67,8 @@ struct method_key_t {
   uint64_t kernel_ip;
   int user_stack_id;
   int kernel_stack_id;
+  uint64_t bp;
+  uint64_t ret;
 };
 //for method latency
 struct latency_key_t {
@@ -105,24 +109,6 @@ int do_perf_event_thread(struct bpf_perf_event_data *ctx) {
     return 0;
 }
 )";
-/*
-int do_perf_event_thread_full(struct bpf_perf_event_data *ctx) {
-    struct task_struct *p = (struct task_struct *) bpf_get_current_task();
-    u32 tgid = p->tgid;
-    if (p->pid == 0) return 0;
-    if (!PID) return 0;
-    struct list_head *h;
-    list_for_each(h, &p->children) {                      //loop not allowed
-        struct task_struct *t = (struct task_struct*)h;
-        struct thread_key_t key = {.pid = tgid};
-        key.tid = t->pid;
-        key.state = t->state;
-        strcpy( key.name, t->comm );
-        counts.increment(key);
-    }
-    return 0;
-}
-*/
 ///////////////////////////////////////////
 string BPF_TXT_FLM = R"(
 #include <linux/sched.h>
@@ -186,22 +172,36 @@ struct method_key_t {
     u64 kernel_ip;
     int user_stack_id;
     int kernel_stack_id;
+    u64 bp;
+    u64 ret;
 };
 BPF_HASH(counts, struct method_key_t);
 BPF_STACK_TRACE(stack_traces, 16384);
-//BPF_ARRAY(top_counter, int, 16);
 BPF_TABLE("array", int, int, top_counter, 16);
+BPF_TABLE("array", int, int, top_ret_counter, 16);
 
-static int incr(int idx) {
+static int inc(int idx) {
     int *ptr = top_counter.lookup(&idx);
     if (ptr) ++(*ptr);
     return 0;
 }
+static int incr(int idx) {
+    int *ptr = top_ret_counter.lookup(&idx);
+    if (ptr) ++(*ptr);
+    return 0;
+}
 //struct bpf_perf_event_data *ctx
-int do_bp_count0(void *ctx){ return incr(0);}
-int do_bp_count1(void *ctx){ return incr(1);}
-int do_bp_count2(void *ctx){ return incr(2);}
-int do_bp_count3(void *ctx){ return incr(3);}
+int do_bp_count0(void *ctx){ return inc(0);}
+int do_bp_count1(void *ctx){ return inc(1);}
+int do_bp_count2(void *ctx){ return inc(2);}
+int do_bp_count3(void *ctx){ return inc(3);}
+int do_bp_count3(void *ctx){ return inc(4);}
+
+int do_ret_count0(void *ctx){ return incr(0);}
+int do_ret_count1(void *ctx){ return incr(1);}
+int do_ret_count2(void *ctx){ return incr(2);}
+int do_ret_count3(void *ctx){ return incr(3);}
+int do_ret_count3(void *ctx){ return incr(4);}
 
 int do_perf_event_method(struct bpf_perf_event_data *ctx) {
     u64 id = bpf_get_current_pid_tgid();
@@ -209,7 +209,17 @@ int do_perf_event_method(struct bpf_perf_event_data *ctx) {
     u32 pid = id;
     if (pid == 0) return 0;
     if (!PID) return 0;
+
+    //struct task_struct *p = (struct task_struct*) bpf_get_current_task();
+    //void* ptr = p->stack + THREAD_SIZE - TOP_OF_KERNEL_STACK_PADDING;
+    //struct pt_regs* regs = ((struct pt_regs *)ptr) - 1;
+    struct pt_regs* regs = &ctx->regs;
     struct method_key_t key = {.pid = tgid};
+    key.bp = regs->bp;
+    //key.ret = regs->r14;
+    u64 ret = regs->bp+8;
+    bpf_probe_read(&key.ret, sizeof(u64), (void *)ret);
+
     key.user_stack_id = stack_traces.get_stackid(&ctx->regs, BPF_F_USER_STACK);
     key.kernel_stack_id = stack_traces.get_stackid(&ctx->regs, 0);
     if (key.kernel_stack_id >= 0) {
@@ -306,7 +316,7 @@ static string get_method_name(jmethodID method) {
 
 static void write_line(const string stack_line, const string& class_name, const Frame* f) {
     if (f->samples > 0) {
-        fprintf(out_mem, "%s %s_[%ld] \n", stack_line.c_str(), class_name.c_str(), f->samples);
+        //fprintf(out_mem, "%s %s_[%ld] \n", stack_line.c_str(), class_name.c_str(), f->samples);
     }
     for (auto it = f->children.begin(); it != f->children.end(); ++it) {
         write_line(stack_line + get_method_name(it->first) + ";", class_name, &it->second);
@@ -390,21 +400,21 @@ bool str_replace(string& str, const string& from, const string& to) {
     return true;
 }
 
-//PROBE.TYPE: BPF_PROBE_ENTRY, BPF_PROBE_RETURN
-perf_event_attr AttachBreakPoint(struct method_type method, const string& fn, int seq){
+perf_event_attr AttachBreakPoint(uint64_t addr, const string& fn, int seq){
     string fn_seq = fn+to_string(seq);
-    fprintf(stdout, "attach to breakpoint: addr=%lx method=%s fn=%s \n", method.addr, method.name.c_str(), fn_seq.c_str() );
+    fprintf(stdout, "attach to breakpoint: addr=%lx fn=%s \n", addr, fn_seq.c_str() );
     struct perf_event_attr attr = {};
     attr.type = PERF_TYPE_BREAKPOINT;
     attr.bp_len = HW_BREAKPOINT_LEN_8; //for exec
     attr.size = sizeof(struct perf_event_attr);
-    attr.bp_addr = method.addr;
+    attr.bp_addr = addr;
     //attr.config = 0;
-    attr.config = seq;
+    attr.config = BP_SEQ;
+    BP_SEQ++;
     attr.bp_type = HW_BREAKPOINT_EMPTY;
     attr.bp_type |= HW_BREAKPOINT_X;  //HW_BREAKPOINT_R/HW_BREAKPOINT_W conflict with HW_BREAKPOINT_X
     attr.sample_period = 1;    // Trigger for every event
-    attr.precise_ip = 2;	//request sync delivery
+    attr.precise_ip = 2;        //request sync delivery
     attr.wakeup_events = 1;
     //attr.inherit = 1;
     int pid=-1;
@@ -414,6 +424,7 @@ perf_event_attr AttachBreakPoint(struct method_type method, const string& fn, in
     if(att_r.code()!=0) cerr << att_r.msg() << endl;
     return attr;
 }
+
 void StartBPF(int id) {
     //cout << "StartBPF(" << id << ")" << endl;
     //ebpf::BPF bpf;
@@ -470,7 +481,7 @@ void PrintThread(){
 template <typename A, typename B> multimap<B, A> flip_map(map<A,B> & src) {
     multimap<B,A> dst;
     for(typename map<A, B>::const_iterator it = src.begin(); it != src.end(); ++it)
-        dst.insert(pair<B, A>(it -> second, it -> first));
+        dst.insert(pair<B, A>(it->second, it->first));
     return dst;
 }
 void PrintTopMethodCount(method_type methods[], int n){
@@ -482,8 +493,20 @@ void PrintTopMethodCount(method_type methods[], int n){
         if (i>n+1) break;
         int value;
         res = cnt.get_value(i, value);
+        if (res.code()!=0) cerr<<res.msg()<<endl;
+        else fprintf(out_cpu, "%d\t %lx\t %s\n", value, methods[i].addr, methods[i].name.c_str() );
+    }
+}
+void PrintTopMethodRetCount(method_type methods[], int n){
+    ebpf::BPFArrayTable<int> cnt = bpf.get_array_table<int>("top_ret_counter");
+    ebpf::StatusTuple res(0);
+    fprintf(out_cpu, "Monitoring Methods:\ncount\t method_ret_addr\t method_name\n");
+    for (int i=0; i<n; i++){
+        if (i>n+1) break;
+        int value;
+        res = cnt.get_value(i, value);
 	if (res.code()!=0) cerr<<res.msg()<<endl;
-	else fprintf(out_cpu, "%d\t %lx\t %s\n", value, methods[i].addr, methods[i].name.c_str() );
+	else fprintf(out_cpu, "%d\t %lx\t %s\n", value, methods[i].ret, methods[i].name.c_str() );
     }
 }
 void DetachBreakPoint(struct perf_event_attr* attr){
@@ -491,27 +514,33 @@ void DetachBreakPoint(struct perf_event_attr* attr){
     bpf.detach_perf_event_raw(attr);
 }
 void MonitorMethods(method_type methods[], int n){
-    perf_event_attr peas[n];
+    perf_event_attr peas[2*n];
     for (int i=0; i<n; i++){
         if (i>n-1) break;
-        peas[i]=AttachBreakPoint(methods[i], "do_bp_count", i);
+	int j=2*i;
+        peas[j]  =AttachBreakPoint(methods[i].addr, "do_bp_count", i);
+        peas[j+1]=AttachBreakPoint(methods[i].ret, "do_ret_count", i);
     }
-    cout<<"sampling for "<<MON_DURATION<<" second"<<endl;
+    cout<<"monitoring "<< n <<" methods for "<<MON_DURATION<<" second"<<endl;
     sleep(MON_DURATION);
 
     for (perf_event_attr attr : peas){
         DetachBreakPoint(&attr);
     }
     PrintTopMethodCount(methods,n);
+    PrintTopMethodRetCount(methods,n);
 }
+
 void PrintTopMethods(int n){
     auto table = bpf.get_hash_table<method_key_t, uint64_t>("counts").get_table_offline();
     auto stacks = bpf.get_stack_table("stack_traces");
+    cout<<"sampled "<< table.size() << " methods"<<endl;
     sort( table.begin(), table.end(),
       [](pair<method_key_t, uint64_t> a, pair<method_key_t, uint64_t> b) {
         return a.second > b.second;
       }
     );
+    fprintf(stdout, "count \t bp     \t ret    \t addr       \t name\n");
     map<method_type, int> mout;
     for (auto it : table) {
         uint64_t method_addr;
@@ -523,7 +552,7 @@ void PrintTopMethods(int n){
             method_addr = *stacks.get_stack_addr(it.first.user_stack_id).begin();
             method_name = *stacks.get_stack_symbol(it.first.user_stack_id, it.first.pid).begin();
         }
-        struct method_type method = {.addr=method_addr, .name=method_name};
+        struct method_type method = {.addr=method_addr, .ret=it.first.ret, .name=method_name};
 	auto p = mout.find(method);
 	if ( p==mout.end() ){
 	    mout.insert(pair<method_type,int>(method, (int)it.second));
@@ -531,19 +560,20 @@ void PrintTopMethods(int n){
 	    (*p).second += it.second;    //merge_method from different callers
 	}
 	if( mout.size() >n ) break;
-        //fprintf(out_cpu, "%ld\t %d\t %d\t %s\n", it.second, it.first.user_stack_id, it.first.kernel_stack_id, method_name.c_str());
-        //fprintf(out_cpu, "%ld\t %d\t %d\t %lx\t %s\n", it.second, it.first.user_stack_id, it.first.kernel_stack_id, method_addr, method_name.c_str());
+        fprintf(stdout,   "%ld\t %lx\t %lx\t, %lx\t %s\n", it.second, it.first.bp, it.first.ret, method_addr, method_name.c_str());
+        //fprintf(out_cpu, "%ld\t %d\t  %d\t  %lx\t %s\n", it.second, it.first.user_stack_id, it.first.kernel_stack_id, method_addr, method_name.c_str());
     }
     fprintf(out_cpu, "samples\t method_addr\t method_name\n");
 
-    cout<<"flip method map..."<<endl;
     multimap<int, method_type> rmap = flip_map(mout);
+    //cout<<"flip method done, printing ("<< rmap.size()<<")"<<endl;
     int i=0;
     method_type methods[n];
     for (multimap<int,method_type>::const_reverse_iterator it = rmap.rbegin(); it!=rmap.rend(); ++it){
         fprintf(out_cpu, "%d\t %lx\t %s\n", it->first, it->second.addr, it->second.name.c_str() );
-	methods[i++]=it->second;
+	if (i<n) methods[i++]=it->second;
     }
+    //cout<<"method array done, printing ("<< n<<")"<<endl;
     if(MON_TOP_N>0){
         cout<<"start monitoring..."<<endl;
         MonitorMethods(methods, MON_TOP_N);
@@ -623,35 +653,35 @@ bool str_contains(string s, string k){
     return s.find(k)==0;
 }
 ///////////////////////////////////////////
-void registerMemoryCapa(jvmtiEnv* jvmti){
+void registerCapa(jvmtiEnv* jvmti){
     jvmtiCapabilities capa = {0};
     capa.can_tag_objects = 1;
-    capa.can_generate_sampled_object_alloc_events = 1;
     capa.can_generate_all_class_hook_events = 1;
     capa.can_generate_compiled_method_load_events = 1;
-    capa.can_generate_garbage_collection_events = 1;
-    capa.can_generate_object_free_events = 1;
-    capa.can_generate_vm_object_alloc_events = 1;
+    //capa.can_generate_sampled_object_alloc_events = 1;
+    //capa.can_generate_garbage_collection_events = 1;
+    //capa.can_generate_object_free_events = 1;
+    //capa.can_generate_vm_object_alloc_events = 1;
     jvmti->AddCapabilities(&capa);
 }
-void registerMemoryCall(jvmtiEnv* jvmti){
+void registerCall(jvmtiEnv* jvmti){
     jvmtiEventCallbacks call = {0};
-    call.SampledObjectAlloc = SampledObjectAlloc;
-    call.DataDumpRequest = DataDumpRequest;
-    call.VMDeath = VMDeath;
-    call.GarbageCollectionStart = GarbageCollectionStart;
-    call.GarbageCollectionFinish = GarbageCollectionFinish;
+    //call.SampledObjectAlloc = SampledObjectAlloc;
+    //call.DataDumpRequest = DataDumpRequest;
+    //call.VMDeath = VMDeath;
+    //call.GarbageCollectionStart = GarbageCollectionStart;
+    //call.GarbageCollectionFinish = GarbageCollectionFinish;
     call.CompiledMethodLoad = CompiledMethodLoad;
     call.CompiledMethodUnload = CompiledMethodUnload;
     call.DynamicCodeGenerated = DynamicCodeGenerated;
     jvmti->SetEventCallbacks(&call, sizeof(call));
 }
-void enableMemoryEvent(jvmtiEnv* jvmti){
-    jvmti->SetEventNotificationMode(JVMTI_ENABLE, JVMTI_EVENT_SAMPLED_OBJECT_ALLOC, NULL);
-    jvmti->SetEventNotificationMode(JVMTI_ENABLE, JVMTI_EVENT_DATA_DUMP_REQUEST, NULL);
-    jvmti->SetEventNotificationMode(JVMTI_ENABLE, JVMTI_EVENT_VM_DEATH, NULL);
-    jvmti->SetEventNotificationMode(JVMTI_ENABLE, JVMTI_EVENT_GARBAGE_COLLECTION_START, NULL);
-    jvmti->SetEventNotificationMode(JVMTI_ENABLE, JVMTI_EVENT_GARBAGE_COLLECTION_FINISH, NULL);
+void enableEvent(jvmtiEnv* jvmti){
+    //jvmti->SetEventNotificationMode(JVMTI_ENABLE, JVMTI_EVENT_SAMPLED_OBJECT_ALLOC, NULL);
+    //jvmti->SetEventNotificationMode(JVMTI_ENABLE, JVMTI_EVENT_DATA_DUMP_REQUEST, NULL);
+    //jvmti->SetEventNotificationMode(JVMTI_ENABLE, JVMTI_EVENT_VM_DEATH, NULL);
+    //jvmti->SetEventNotificationMode(JVMTI_ENABLE, JVMTI_EVENT_GARBAGE_COLLECTION_START, NULL);
+    //jvmti->SetEventNotificationMode(JVMTI_ENABLE, JVMTI_EVENT_GARBAGE_COLLECTION_FINISH, NULL);
 
     jvmti->SetEventNotificationMode(JVMTI_ENABLE, JVMTI_EVENT_COMPILED_METHOD_LOAD, NULL);
     jvmti->SetEventNotificationMode(JVMTI_ENABLE, JVMTI_EVENT_COMPILED_METHOD_UNLOAD, NULL);
@@ -659,6 +689,11 @@ void enableMemoryEvent(jvmtiEnv* jvmti){
 
     jvmti->GenerateEvents(JVMTI_EVENT_DYNAMIC_CODE_GENERATED);
     jvmti->GenerateEvents(JVMTI_EVENT_COMPILED_METHOD_LOAD);
+}
+void gen_perf_file(){
+    registerCapa(jvmti);
+    registerCall(jvmti);
+    enableEvent(jvmti);
 }
 int do_single_options(string k, string v, jvmtiEnv* jvmti){
     if (k.compare("sample_duration") == 0){
@@ -672,25 +707,22 @@ int do_single_options(string k, string v, jvmtiEnv* jvmti){
     }else if(k.compare("monitor_top")==0){
         MON_TOP_N=stoi(v);
     }else if(k.compare("sample_cpu")==0){
+        gen_perf_file();
         out_cpu = fopen(v.c_str(), "w");
         return 0;
     }else if(k.compare("sample_method")==0){
+        gen_perf_file();
         out_cpu = fopen(v.c_str(), "w");
         return 1;
     }else if(k.compare("sample_thread")==0){
         out_thread = fopen(v.c_str(), "w");
         return 2;
-    }else if(k.compare("sample_mem")==0){
-        registerMemoryCapa(jvmti);
-        jvmti->SetHeapSamplingInterval(1024*1024); //1m
-        registerMemoryCall(jvmti);
-	enableMemoryEvent(jvmti);
-        out_mem = fopen(v.c_str(), "w");
     }
+    //jvmti->SetHeapSamplingInterval(1024*1024); //1m
     return -1;
 }
 void InitFile() {
-    out_mem = stderr;
+    //out_mem = stderr;
     out_cpu = stdout;
     out_thread = stdout;
     string pid = to_string(getpid());
@@ -719,7 +751,7 @@ JNIEXPORT jint JNICALL Agent_OnLoad(JavaVM* vm, char* options, void* reserved) {
     StartBPF(id);
     StopBPF();
     PrintBPF(id);
-    fclose(out_mem);
+    //fclose(out_mem);
     cout << "Done."<< endl;
     return 0;
 }

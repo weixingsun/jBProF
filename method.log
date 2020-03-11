@@ -1,17 +1,19 @@
 samples	 method_addr	 method_name
-240	 7f01f15631f1	 ParCompactionManager::follow_marking_stacks()
-236	 7f01f150d3f8	 ParMarkBitMap::mark_obj(HeapWordImpl**, unsigned long)
-204	 7f01f156c9e5	 ParallelCompactData::add_obj(HeapWordImpl**, unsigned long)
-203	 7f01f150d458	 ParMarkBitMap::mark_obj(HeapWordImpl**, unsigned long)
-99	 7f01f150d445	 ParMarkBitMap::mark_obj(HeapWordImpl**, unsigned long)
-42	 7f01f15633e8	 ParCompactionManager::follow_marking_stacks()
-26	 7f01f156c282	 UpdateOnlyClosure::do_addr(HeapWordImpl**, unsigned long)
-24	 7f01f150d470	 ParMarkBitMap::mark_obj(HeapWordImpl**, unsigned long)
-17	 7f01f15641d8	 ParCompactionManager::follow_contents(oopDesc*)
-16	 7f01f1564218	 ParCompactionManager::follow_contents(oopDesc*)
+252	 7f56077649e5	 ParallelCompactData::add_obj(HeapWordImpl**, unsigned long)
+232	 7f5607705458	 ParMarkBitMap::mark_obj(HeapWordImpl**, unsigned long)
+229	 7f56077053f8	 ParMarkBitMap::mark_obj(HeapWordImpl**, unsigned long)
+223	 7f560775b1f1	 ParCompactionManager::follow_marking_stacks()
+83	 7f5607705445	 ParMarkBitMap::mark_obj(HeapWordImpl**, unsigned long)
+56	 7f560775b3e8	 ParCompactionManager::follow_marking_stacks()
+23	 7f56070c7030	 ClassLoaderData::oops_do(OopClosure*, int, bool)
+19	 7f56077341a7	 void OopOopIterateDispatch<PCIterateMarkAndPushClosure>::Table::oop_oop_iterate<InstanceKlass, unsigned int>(PCIterateMarkAndPushClosure*, oopDesc*, Klass*)
+19	 7f5607733730	 void OopOopIterateDispatch<PCAdjustPointerClosure>::Table::oop_oop_iterate<InstanceKlass, unsigned int>(PCAdjustPointerClosure*, oopDesc*, Klass*)
+17	 7f560776914b	 ParallelCompactData::calc_new_pointer(HeapWordImpl**, ParCompactionManager*)
 Monitoring Methods:
 count	 method_addr	 method_name
-89285	 7f01f15631f1	 ParCompactionManager::follow_marking_stacks()
-89493	 7f01f150d3f8	 ParMarkBitMap::mark_obj(HeapWordImpl**, unsigned long)
-88977	 7f01f156c9e5	 ParallelCompactData::add_obj(HeapWordImpl**, unsigned long)
-88980	 7f01f150d458	 ParMarkBitMap::mark_obj(HeapWordImpl**, unsigned long)
+116476	 7f56077649e5	 ParallelCompactData::add_obj(HeapWordImpl**, unsigned long)
+116185	 7f5607705458	 ParMarkBitMap::mark_obj(HeapWordImpl**, unsigned long)
+Monitoring Methods:
+count	 method_ret_addr	 method_name
+116538	 7f560775c22a	 ParallelCompactData::add_obj(HeapWordImpl**, unsigned long)
+116081	 7f560775c22a	 ParMarkBitMap::mark_obj(HeapWordImpl**, unsigned long)

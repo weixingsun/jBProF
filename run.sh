@@ -1,9 +1,9 @@
 
 AGENT=profiler.so
 rm -rf $AGENT log thread.log cpu.log mem.log hs_err* jcmd.log /tmp/perf*  #flame.svg
-pkill java
+kill -9 `ps -ef|grep java|grep -v grep |awk '{print $2}'`
 LOOP=3000000
-JIT="-Xmx300m -Xms300m -XX:+UseParallelOldGC -XX:ParallelGCThreads=1 -XX:+PreserveFramePointer"
+JIT="-Xmx300m -Xms300m -XX:+UseParallelOldGC -XX:ParallelGCThreads=1 -XX:+PreserveFramePointer" # -XX:+DTraceMethodProbes" #-XX:+ExtendedDTraceProbes
 
 JAVA_HOME=/home/sun/jbb/jdk13
 java_build(){
@@ -57,5 +57,7 @@ if [ $? = 0 ]; then
     #run_and_attach $AGENT "sample_duration=3;frequency=49;sample_thread=thread.log"
 
     #run_and_attach $AGENT "sample_duration=3;sample_top=9;sample_method=method.log"
-    run_and_attach $AGENT "sample_duration=3;sample_top=9;sample_method=method.log;monitor_duration=1;monitor_top=4"
+    run_and_attach $AGENT "sample_duration=3;sample_top=9;sample_method=method.log;monitor_duration=1;monitor_top=2"
+    #grep Main.loop /tmp/perf-*.map
+    #perf top
 fi
