@@ -29,23 +29,44 @@ Features:
 3.Method Sampling: [method.log](https://github.com/weixingsun/jBProF/blob/master/method.log)
 
     "sample_duration=3;sample_top=9;sample_method=method.log"
-    "sample_duration=3;sample_top=9;sample_method=method.log;monitor_duration=1;monitor_top=3"
+    "sample_duration=3;sample_top=9;sample_method=method.log;monitor_duration=1;count_top=3"
+    "sample_duration=3;sample_top=9;sample_method=method.log;monitor_duration=1;lat_top=2"
     
-    Sampling top methods for 3 seconds:
+    Top methods for 3 seconds:
     samples	 method_addr	 method_name
-    240 	 7f01f15631f1	 ParCompactionManager::follow_marking_stacks()
-    236 	 7f01f150d3f8	 ParMarkBitMap::mark_obj(HeapWordImpl**, unsigned long)
-    204 	 7f01f156c9e5	 ParallelCompactData::add_obj(HeapWordImpl**, unsigned long)
-    203 	 7f01f150d458	 ParMarkBitMap::mark_obj(HeapWordImpl**, unsigned long)
-    42   	 7f01f15633e8	 ParCompactionManager::follow_marking_stacks()
-    26  	 7f01f156c282	 UpdateOnlyClosure::do_addr(HeapWordImpl**, unsigned long)
-    24  	 7f01f150d470	 ParMarkBitMap::mark_obj(HeapWordImpl**, unsigned long)
-    17  	 7f01f15641d8	 ParCompactionManager::follow_contents(oopDesc*)
-    Monitoring Top Methods for 1 second:
-    count	 method_addr	 method_name
-    89285	 7f01f15631f1	 ParCompactionManager::follow_marking_stacks()
-    89493	 7f01f150d3f8	 ParMarkBitMap::mark_obj(HeapWordImpl**, unsigned long)
-    88977	 7f01f156c9e5	 ParallelCompactData::add_obj(HeapWordImpl**, unsigned long)
+    176	 7f4a37600458	 ParMarkBitMap::mark_obj(HeapWordImpl**, unsigned long)
+    158	 7f4a376561f1	 ParCompactionManager::follow_marking_stacks()
+    151	 7f4a376003f8	 ParMarkBitMap::mark_obj(HeapWordImpl**, unsigned long)
+    141	 7f4a3765f9e5	 ParallelCompactData::add_obj(HeapWordImpl**, unsigned long)
+    46	 7f4a37600445	 ParMarkBitMap::mark_obj(HeapWordImpl**, unsigned long)
+    39	 7f4a376563e8	 ParCompactionManager::follow_marking_stacks()
+    23	 7f4a3766414b	 ParallelCompactData::calc_new_pointer(HeapWordImpl**, ParCompactionManager*)
+    18	 7f4a37600415	 ParMarkBitMap::mark_obj(HeapWordImpl**, unsigned long)
+    16	 7f4a3765620a	 ParCompactionManager::follow_marking_stacks()
+
+    (9) latency for method: (7f4a37600458 -> 7f4a3765722a)	"ParMarkBitMap::mark_obj(HeapWordImpl**, unsigned long)"
+    nsecs    	     count
+    >4096     	     79888	 
+    >8192     	     806	 
+    >16384     	     151	 
+    >32768     	     36	 
+    >65536     	     49	 
+    >131072     	 33	 
+    >262144     	 12	 
+    >524288     	 1	 
+    >1048576     	 2	 
+
+    (9) latency for method: (7f4a376561f1 -> 7f4a3762c318)	"ParCompactionManager::follow_marking_stacks()"
+    nsecs    	     count
+    >4096     	     79888	 
+    >8192     	     806	 
+    >16384     	     151	 
+    >32768     	     36	 
+    >65536     	     49	 
+    >131072     	 33	 
+    >262144     	 12	 
+    >524288     	 1	 
+    >1048576     	 2	 
 
 
 Install:
