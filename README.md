@@ -30,7 +30,7 @@ Features:
 
     "sample_duration=3;sample_top=9;sample_method=method.log"
     "sample_duration=3;sample_top=9;sample_method=method.log;monitor_duration=1;count_top=3"
-    "sample_duration=3;sample_top=9;sample_method=method.log;monitor_duration=1;lat_top=2"
+    "sample_duration=3;sample_top=9;sample_method=method.log;monitor_duration=1;lat_top=1"
     
     Top methods for 3 seconds:
     samples	 method_addr	 method_name
@@ -45,18 +45,6 @@ Features:
     16	 7f4a3765620a	 ParCompactionManager::follow_marking_stacks()
 
     (9) latency for method: (7f4a37600458 -> 7f4a3765722a)	"ParMarkBitMap::mark_obj(HeapWordImpl**, unsigned long)"
-    nsecs    	     count
-    >4096     	     79888	 
-    >8192     	     806	 
-    >16384     	     151	 
-    >32768     	     36	 
-    >65536     	     49	 
-    >131072     	 33	 
-    >262144     	 12	 
-    >524288     	 1	 
-    >1048576     	 2	 
-
-    (9) latency for method: (7f4a376561f1 -> 7f4a3762c318)	"ParCompactionManager::follow_marking_stacks()"
     nsecs    	     count
     >4096     	     79888	 
     >8192     	     806	 
