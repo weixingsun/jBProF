@@ -582,18 +582,19 @@ void LatencyMethod(method_type method){
     for (auto it=dist.begin(); it!=dist.end();it++) {
         fprintf(out_cpu, ">%ld     \t %ld\t \n", (long)exp2(it->first), it->second );
     }
+    dist.clear();
 }
 
 void PrintTopMethods(int n){
     auto table = bpf.get_hash_table<method_key_t, uint64_t>("counts").get_table_offline();
     auto stacks = bpf.get_stack_table("stack_traces");
-    cout<<"sampled "<< table.size() << " methods"<<endl;
+    //cout<<"sampled "<< table.size() << " methods"<<endl;
     sort( table.begin(), table.end(),
       [](pair<method_key_t, uint64_t> a, pair<method_key_t, uint64_t> b) {
         return a.second > b.second;
       }
     );
-    fprintf(stdout, "count \t bp     \t ret    \t addr       \t name\n");
+    //fprintf(stdout, "count \t bp     \t ret    \t addr       \t name\n");
     map<method_type, int> mout;
     for (auto it : table) {
         uint64_t method_addr;
@@ -613,7 +614,7 @@ void PrintTopMethods(int n){
 	    (*p).second += it.second;    //merge_method from different callers
 	}
 	if( mout.size() >n ) break;
-        fprintf(stdout,   "%ld\t %lx\t %lx\t, %lx\t %s\n", it.second, it.first.bp, it.first.ret, method_addr, method_name.c_str());
+        //fprintf(stdout,   "%ld\t %lx\t %lx\t, %lx\t %s\n", it.second, it.first.bp, it.first.ret, method_addr, method_name.c_str());
         //fprintf(out_cpu, "%ld\t %d\t  %d\t  %lx\t %s\n", it.second, it.first.user_stack_id, it.first.kernel_stack_id, method_addr, method_name.c_str());
     }
     fprintf(out_cpu, "samples\t method_addr\t method_name\n");

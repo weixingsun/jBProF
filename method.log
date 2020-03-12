@@ -1,35 +1,35 @@
 samples	 method_addr	 method_name
-176	 7f4a37600458	 ParMarkBitMap::mark_obj(HeapWordImpl**, unsigned long)
-158	 7f4a376561f1	 ParCompactionManager::follow_marking_stacks()
-151	 7f4a376003f8	 ParMarkBitMap::mark_obj(HeapWordImpl**, unsigned long)
-141	 7f4a3765f9e5	 ParallelCompactData::add_obj(HeapWordImpl**, unsigned long)
-46	 7f4a37600445	 ParMarkBitMap::mark_obj(HeapWordImpl**, unsigned long)
-39	 7f4a376563e8	 ParCompactionManager::follow_marking_stacks()
-23	 7f4a3766414b	 ParallelCompactData::calc_new_pointer(HeapWordImpl**, ParCompactionManager*)
-19	 7f4a3762f130	 void OopOopIterateDispatch<PCIterateMarkAndPushClosure>::Table::oop_oop_iterate<InstanceKlass, unsigned int>(PCIterateMarkAndPushClosure*, oopDesc*, Klass*)
-18	 7f4a37600415	 ParMarkBitMap::mark_obj(HeapWordImpl**, unsigned long)
-16	 7f4a3765620a	 ParCompactionManager::follow_marking_stacks()
+214	 7ff0422323f8	 ParMarkBitMap::mark_obj(HeapWordImpl**, unsigned long)
+200	 7ff0422919e5	 ParallelCompactData::add_obj(HeapWordImpl**, unsigned long)
+176	 7ff042232458	 ParMarkBitMap::mark_obj(HeapWordImpl**, unsigned long)
+174	 7ff0422881f1	 ParCompactionManager::follow_marking_stacks()
+101	 7ff042232445	 ParMarkBitMap::mark_obj(HeapWordImpl**, unsigned long)
+31	 7ff0422883e8	 ParCompactionManager::follow_marking_stacks()
+22	 7ff04229614b	 ParallelCompactData::calc_new_pointer(HeapWordImpl**, ParCompactionManager*)
+19	 7ff0422891ef	 ParCompactionManager::follow_contents(oopDesc*)
+19	 7ff0422891d8	 ParCompactionManager::follow_contents(oopDesc*)
+18	 7ff04226118a	 void OopOopIterateDispatch<PCIterateMarkAndPushClosure>::Table::oop_oop_iterate<InstanceKlass, unsigned int>(PCIterateMarkAndPushClosure*, oopDesc*, Klass*)
 
-(9) latency for method: (7f4a37600458 -> 7f4a3765722a)	"ParMarkBitMap::mark_obj(HeapWordImpl**, unsigned long)"
+(9) latency for method: (7ff0422323f8 -> 7ff04228922a)	"ParMarkBitMap::mark_obj(HeapWordImpl**, unsigned long)"
 nsecs    	 count
->4096     	 79888	 
->8192     	 806	 
->16384     	 151	 
->32768     	 36	 
->65536     	 49	 
->131072     	 33	 
+>4096     	 79252	 
+>8192     	 1142	 
+>16384     	 141	 
+>32768     	 59	 
+>65536     	 44	 
+>131072     	 51	 
 >262144     	 12	 
->524288     	 1	 
->1048576     	 2	 
+>524288     	 2	 
+>1048576     	 1	 
 
-(9) latency for method: (7f4a376561f1 -> 7f4a3762c318)	"ParCompactionManager::follow_marking_stacks()"
+(9) latency for method: (7ff0422919e5 -> 7ff04228922a)	"ParallelCompactData::add_obj(HeapWordImpl**, unsigned long)"
 nsecs    	 count
->4096     	 79888	 
->8192     	 806	 
->16384     	 151	 
->32768     	 36	 
->65536     	 49	 
->131072     	 33	 
->262144     	 12	 
->524288     	 1	 
->1048576     	 2	 
+>4096     	 149700	 
+>8192     	 7197	 
+>16384     	 277	 
+>32768     	 90	 
+>65536     	 89	 
+>131072     	 120	 
+>262144     	 25	 
+>524288     	 2	 
+>1048576     	 3	 
