@@ -57,7 +57,9 @@ if [ $? = 0 ]; then
     #run_and_attach $AGENT "sample_duration=3;frequency=49;sample_thread=thread.log"
 
     #run_and_attach $AGENT "sample_duration=3;sample_top=9;sample_method=method.log"
-    run_and_attach $AGENT "sample_duration=3;sample_top=9;sample_method=method.log;monitor_duration=1;monitor_top=2"
+    #run_and_attach $AGENT "sample_duration=3;sample_top=9;sample_method=method.log;monitor_duration=1;count_top=1"
+    run_and_attach $AGENT "sample_duration=3;sample_top=9;sample_method=method.log;monitor_duration=1;lat_top=2"
     #grep Main.loop /tmp/perf-*.map
     #perf top
+    #/usr/share/bcc/tools/funclatency -d 3 c:malloc
 fi

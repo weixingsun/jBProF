@@ -2,6 +2,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <string>
+#include <math.h>
 #include <map>
 #include <stack>
 #include <iostream>
@@ -28,7 +29,8 @@ static jvmtiEnv* jvmti = NULL;
 static jrawMonitorID tree_lock;
 
 static int SAMPLE_TOP_N = 20;
-static int MON_TOP_N = 0;
+static int COUNT_TOP_N = 0;
+static int LAT_TOP_N = 0;
 static int BPF_PERF_FREQ = 49;
 static int DURATION = 10;
 static int MON_DURATION = 5;
@@ -71,9 +73,9 @@ struct method_key_t {
   uint64_t ret;
 };
 //for method latency
-struct latency_key_t {
-  uint64_t addr;
-
+struct hist_key_t {
+    uint64_t key;
+    uint64_t slot;
 };
 //for thread sampling
 struct thread_key_t {
@@ -175,10 +177,17 @@ struct method_key_t {
     u64 bp;
     u64 ret;
 };
+typedef struct hist_key {
+    u64 key;
+    u64 count;
+} hist_key_t;
+
 BPF_HASH(counts, struct method_key_t);
 BPF_STACK_TRACE(stack_traces, 16384);
 BPF_TABLE("array", int, int, top_counter, 16);
 BPF_TABLE("array", int, int, top_ret_counter, 16);
+BPF_HASH(start, u32);
+BPF_HISTOGRAM(dist, u64);
 
 static int inc(int idx) {
     int *ptr = top_counter.lookup(&idx);
@@ -195,13 +204,37 @@ int do_bp_count0(void *ctx){ return inc(0);}
 int do_bp_count1(void *ctx){ return inc(1);}
 int do_bp_count2(void *ctx){ return inc(2);}
 int do_bp_count3(void *ctx){ return inc(3);}
-int do_bp_count3(void *ctx){ return inc(4);}
+int do_bp_count4(void *ctx){ return inc(4);}
 
 int do_ret_count0(void *ctx){ return incr(0);}
 int do_ret_count1(void *ctx){ return incr(1);}
 int do_ret_count2(void *ctx){ return incr(2);}
 int do_ret_count3(void *ctx){ return incr(3);}
-int do_ret_count3(void *ctx){ return incr(4);}
+int do_ret_count4(void *ctx){ return incr(4);}
+
+int func_entry0(struct bpf_perf_event_data *ctx){
+    u64 pid_tgid = bpf_get_current_pid_tgid();
+    //u32 tgid = pid_tgid >> 32;
+    u32 pid = pid_tgid;
+    //u64 ip = PT_REGS_IP(&ctx->regs);
+    //ipaddr.update(&pid, &ip);
+    u64 ts = bpf_ktime_get_ns();
+    start.update(&pid, &ts);
+    return 0;
+}
+int func_return0(struct bpf_perf_event_data *ctx) {
+    u64 pid_tgid = bpf_get_current_pid_tgid();
+    //u32 tgid = pid_tgid >> 32;
+    u32 pid = pid_tgid;
+    u64 *tsp = start.lookup(&pid);
+    if (tsp == 0) return 0;
+    u64 delta = bpf_ktime_get_ns() - *tsp;
+    start.delete(&pid);
+
+    u64 key = bpf_log2l(delta);
+    dist.increment(key);
+    return 0;
+} 
 
 int do_perf_event_method(struct bpf_perf_event_data *ctx) {
     u64 id = bpf_get_current_pid_tgid();
@@ -513,7 +546,7 @@ void DetachBreakPoint(struct perf_event_attr* attr){
     cout<<"detached bp"<<endl;
     bpf.detach_perf_event_raw(attr);
 }
-void MonitorMethods(method_type methods[], int n){
+void CountMethods(method_type methods[], int n){
     perf_event_attr peas[2*n];
     for (int i=0; i<n; i++){
         if (i>n-1) break;
@@ -521,7 +554,7 @@ void MonitorMethods(method_type methods[], int n){
         peas[j]  =AttachBreakPoint(methods[i].addr, "do_bp_count", i);
         peas[j+1]=AttachBreakPoint(methods[i].ret, "do_ret_count", i);
     }
-    cout<<"monitoring "<< n <<" methods for "<<MON_DURATION<<" second"<<endl;
+    cout<<"counting "<< n <<" methods for "<<MON_DURATION<<" second"<<endl;
     sleep(MON_DURATION);
 
     for (perf_event_attr attr : peas){
@@ -529,6 +562,26 @@ void MonitorMethods(method_type methods[], int n){
     }
     PrintTopMethodCount(methods,n);
     PrintTopMethodRetCount(methods,n);
+}
+void LatencyMethod(method_type method){
+    perf_event_attr peas[2];
+    peas[0]  =AttachBreakPoint(method.addr, "func_entry", 0);
+    peas[1]=AttachBreakPoint(method.ret, "func_return", 0);
+    cout<<"latency measuring for "<<MON_DURATION<<" second"<<endl;
+    sleep(MON_DURATION);
+    DetachBreakPoint(&peas[0]);
+    DetachBreakPoint(&peas[1]);
+    auto dist = bpf.get_hash_table<uint64_t, uint64_t>("dist").get_table_offline();
+    sort( dist.begin(), dist.end(),
+      [](pair<uint64_t, uint64_t> a, pair<uint64_t, uint64_t> b) {
+        return a.first < b.first;
+      }
+    );
+    fprintf(out_cpu, "\n(%ld) latency for method: (%lx -> %lx)\t\"%s\"\n", dist.size(), method.addr, method.ret, method.name.c_str() );
+    fprintf(out_cpu, "nsecs    \t count\n"); // distribution\n");
+    for (auto it=dist.begin(); it!=dist.end();it++) {
+        fprintf(out_cpu, ">%ld     \t %ld\t \n", (long)exp2(it->first), it->second );
+    }
 }
 
 void PrintTopMethods(int n){
@@ -574,9 +627,15 @@ void PrintTopMethods(int n){
 	if (i<n) methods[i++]=it->second;
     }
     //cout<<"method array done, printing ("<< n<<")"<<endl;
-    if(MON_TOP_N>0){
-        cout<<"start monitoring..."<<endl;
-        MonitorMethods(methods, MON_TOP_N);
+    if(COUNT_TOP_N>0){
+        cout<<"start count monitoring..."<<endl;
+        CountMethods(methods, COUNT_TOP_N);
+    }
+    if(LAT_TOP_N>0){
+        cout<<"start latency measuring..."<<endl;
+        for (int i=0; i<LAT_TOP_N; i++){
+            LatencyMethod(methods[i]);
+        }
     }
     fclose(out_cpu);
 }
@@ -704,8 +763,10 @@ int do_single_options(string k, string v, jvmtiEnv* jvmti){
         BPF_PERF_FREQ=stoi(v);
     }else if(k.compare("sample_top")==0){
         SAMPLE_TOP_N=stoi(v);
-    }else if(k.compare("monitor_top")==0){
-        MON_TOP_N=stoi(v);
+    }else if(k.compare("count_top")==0){
+        COUNT_TOP_N=stoi(v);
+    }else if(k.compare("lat_top")==0){
+        LAT_TOP_N=stoi(v);
     }else if(k.compare("sample_cpu")==0){
         gen_perf_file();
         out_cpu = fopen(v.c_str(), "w");
