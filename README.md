@@ -3,6 +3,7 @@
     JVM profiling tool on linux: low overhead, robust, accurate. 
     Consistent with perf top/record
     Automatically resolve symbols
+    Hardware breakpoint based sampling, measuring
 
 Features: 
 
@@ -20,7 +21,7 @@ Features:
 
     "sample_duration=3;frequency=49;sample_thread=thread.log"
     
-    pid		tid		count	pct		name
+    pid 	tid		count	pct		name
     8876	8880	8		0.52	VM Thread
     8876	8879	790		51.13	ParGC Thread#1
     8876	8877	5		0.32	java
@@ -45,12 +46,12 @@ Features:
     16	 7f4a3765620a	 ParCompactionManager::follow_marking_stacks()
 
     (9) latency for method: (7f4a37600458 -> 7f4a3765722a)	"ParMarkBitMap::mark_obj(HeapWordImpl**, unsigned long)"
-    nsecs    	     count
-    >4096     	     79888	 
-    >8192     	     806	 
-    >16384     	     151	 
-    >32768     	     36	 
-    >65536     	     49	 
+    nsecs   	     count
+    >4096   	     79888	 
+    >8192   	     806	 
+    >16384   	     151	 
+    >32768   	     36	 
+    >65536   	     49	 
     >131072     	 33	 
     >262144     	 12	 
     >524288     	 1	 
