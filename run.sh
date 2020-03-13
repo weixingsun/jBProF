@@ -1,5 +1,8 @@
-
+SRC=profiler.cpp
 AGENT=profiler.so
+if [ ! -f $SRC ]; then
+    mv $AGENT $SRC
+fi
 rm -rf $AGENT log thread.log cpu.log mem.log hs_err* jcmd.log /tmp/perf*  #flame.svg
 kill -9 `ps -ef|grep java|grep -v grep |awk '{print $2}'`
 LOOP=3000000
