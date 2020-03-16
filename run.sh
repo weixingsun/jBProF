@@ -45,9 +45,9 @@ run_with_agent(){
     OPT=$2
     #-XX:+EnableJVMCI -XX:+UseJVMCICompiler -XX:-TieredCompilation -XX:+PrintCompilation -XX:+UnlockExperimentalVMOptions 
     echo "$JAVA_HOME/bin/java $JIT -agentpath:./$AGT=$OPT Main $LOOP"
-    time $JAVA_HOME/bin/java $JIT -agentpath:./$AGT=$OPT Main $LOOP > java.log 2>&1 &
-    pid=`pgrep java`
-    echo "PID=$pid"
+    time $JAVA_HOME/bin/java $JIT -agentpath:./$AGT=$OPT Main $LOOP 
+    #pid=`pgrep java`
+    #echo "PID=$pid"
 }
 java_build
 cpp_build
@@ -61,7 +61,8 @@ if [ $? = 0 ]; then
 
     #run_and_attach $AGENT "sample_duration=3;sample_top=9;sample_method=method.log"
     #run_and_attach $AGENT "sample_duration=3;sample_top=9;sample_method=method.log;monitor_duration=1;count_top=1"
-    run_and_attach $AGENT "sample_duration=3;sample_top=9;sample_method=method.log;monitor_duration=1;lat_top=2"
+    #run_and_attach $AGENT "sample_duration=3;sample_top=9;sample_method=method.log;monitor_duration=1;lat_top=2"
+    run_with_agent $AGENT "sample_duration=3;sample_mem=mem.log"
     #grep Main.loop /tmp/perf-*.map
     #perf top
     #/usr/share/bcc/tools/funclatency -d 3 c:malloc

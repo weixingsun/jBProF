@@ -7,8 +7,10 @@
 #include <stack>
 #include <iostream>
 #include <sstream>
+#include <signal.h>
 #include <stdarg.h>
 #include <stdio.h>
+#include <sys/time.h>
 #include <unistd.h>
 #include <bcc/BPF.h>
 #include <jvmti.h>
@@ -23,8 +25,6 @@ static FILE* out_cpu;
 static FILE* out_thread;
 //static FILE* out_mem;
 static FILE* out_perf;
-static jlong start_time;
-static jrawMonitorID vmtrace_lock;
 static jvmtiEnv* jvmti = NULL;
 static jrawMonitorID tree_lock;
 
@@ -38,6 +38,7 @@ static int BP_SEQ = 1;
 static ebpf::BPF bpf;
 static map<int,string> BPF_TXT_MAP;
 static map<int,string> BPF_FN_MAP;
+static map<string,int> MEM_MAP;
 
 struct Frame {
     jlong samples;
@@ -304,9 +305,8 @@ static jlong get_time(jvmtiEnv* jvmti) {
     return current_time;
 }
 
-// Converts JVM internal class signature to human readable name
-static string decode_class_signature(char* class_sig) {
-    //Lorg/net/XX  [I
+static string decode_class_signature(string class_sig) {
+    //Lorg/net/XX  [O
     switch (class_sig[1]) {
         case 'B': return "byte";
         case 'C': return "char";
@@ -317,31 +317,30 @@ static string decode_class_signature(char* class_sig) {
         case 'S': return "short";
         case 'Z': return "boolean";
     }
-    // rm first 'L'|'[' and last ';'
-    class_sig++;
-    class_sig[strlen(class_sig) - 1] = 0;
+    // rm first 'L' and last ';'
+    class_sig.erase(0, 1);
+    class_sig.pop_back();
+    //class_sig.substr(1,class_sig.size()-2);
     // Replace '/' with '.'
-    for (char* c = class_sig; *c; c++) {
-        if (*c == '/') *c = '.';
-    }
-
+    replace( class_sig.begin(), class_sig.end(), '/', '.' );
     return class_sig;
 }
 void jvmti_free(char* ptr){
     if (ptr != NULL) jvmti->Deallocate((unsigned char*) ptr);
 }
 static string get_method_name(jmethodID method) {
+    //cout<<"get_method_name()"<<endl;
     jclass method_class;
     char* class_sig = NULL;
     char* method_name = NULL;
-    string result;
     if (jvmti->GetMethodDeclaringClass(method, &method_class) == 0 &&
         jvmti->GetClassSignature(method_class, &class_sig, NULL) == 0 &&
         jvmti->GetMethodName(method, &method_name, NULL, NULL) == 0) {
-        result.assign(decode_class_signature(class_sig) + "." + method_name);
+        string result = decode_class_signature(string(class_sig)) + "." + method_name;
         jvmti_free(method_name);
         jvmti_free(class_sig);
-	return result;
+        return result;
+        //return decode_class_signature(string(class_sig)) + "." + method_name;
     } else {
         return "(NONAME)";
     }
@@ -371,25 +370,55 @@ static void record_stack_trace(char* class_sig, jvmtiFrameInfo* frames, jint cou
     f->bytes += size;
 }
 
-void JNICALL SampledObjectAlloc(jvmtiEnv* jvmti, JNIEnv* env, jthread thread,
-                                jobject object, jclass object_klass, jlong size) {
-    jvmtiFrameInfo frames[MAX_STACK_DEPTH];
+string getCallerMethodName(jthread thread){
+    int DEPTH = 1;
+    jvmtiFrameInfo frames[DEPTH];
     jint count;
-    if (jvmti->GetStackTrace(thread, 0, MAX_STACK_DEPTH, frames, &count) != 0) {
-        return;
+    if( jvmti->GetStackTrace(thread, 0, DEPTH, frames, &count) ==0 ){
+        jmethodID method = frames[0].method;
+	return get_method_name(method);
+    }else{
+        return "(NONAME)";
     }
-
-    char* class_sig;
-    if (jvmti->GetClassSignature(object_klass, &class_sig, NULL) != 0) {
-        return;
+}
+void JNICALL SampledObjectAlloc(jvmtiEnv* jvmti, JNIEnv* env, jthread thread,
+                                jobject object, jclass klass, jlong size) {
+    char* class_sig = NULL;
+    if (jvmti->GetClassSignature(klass, &class_sig, NULL) ==0 ){
+        string method_name = getCallerMethodName(thread);
+        string result = method_name+"("+decode_class_signature(string(class_sig)) + ")";
+        jvmti->RawMonitorEnter(tree_lock);
+        MEM_MAP[result]++;
+        //cout<<"      SampleObjectAlloc() map.size="<<MEM_MAP.size()<<endl;
+        jvmti->RawMonitorExit(tree_lock);
     }
-    jvmti->RawMonitorEnter(tree_lock);
-    record_stack_trace(class_sig, frames, count, size);
-    jvmti->RawMonitorExit(tree_lock);
-
     jvmti_free(class_sig);
+   
 }
 
+void PrintMemoryMap(int signum){
+    cout<<"sampled alloc objects: map.size="<<MEM_MAP.size()<<endl;
+    //if(MEM_MAP.size() >0){
+        for(auto elem : MEM_MAP){
+            cout << "\t" <<elem.second << "\t" << elem.first << endl;
+        }
+        MEM_MAP.clear();
+    //}
+}
+void SetupTimer(int duration, int interval, __sighandler_t timer_handler){
+    struct sigaction sa;
+    itimerval timer;
+    /* Install timer_handler as the signal handler for SIGVTALRM. */
+    memset (&sa, 0, sizeof (sa));
+    sa.sa_handler = timer_handler;
+    sigaction (SIGVTALRM, &sa, NULL);
+
+    timer.it_value.tv_sec = duration;
+    timer.it_value.tv_usec = 0;
+    timer.it_interval.tv_sec = interval;
+    timer.it_interval.tv_usec = 0;
+    setitimer (ITIMER_VIRTUAL, &timer, NULL);
+}
 void JNICALL DataDumpRequest(jvmtiEnv* jvmti) {
     jvmti->RawMonitorEnter(tree_lock);
     write_loop_root();
@@ -665,7 +694,6 @@ void PrintFlame(){
                 stack_traces.push(sym);
             }
         }
-        //fprintf(out_cpu, "%s;", string(it.first.name).c_str());
         fprintf(out_cpu, "%s;", it.first.name);
         while (!stack_traces.empty()){
             fprintf(out_cpu, "%s", stack_traces.top().c_str());
@@ -713,47 +741,61 @@ bool str_contains(string s, string k){
     return s.find(k)==0;
 }
 ///////////////////////////////////////////
-void registerCapa(jvmtiEnv* jvmti){
+void registerCapa(int mode){
     jvmtiCapabilities capa = {0};
-    capa.can_tag_objects = 1;
-    capa.can_generate_all_class_hook_events = 1;
-    capa.can_generate_compiled_method_load_events = 1;
-    //capa.can_generate_sampled_object_alloc_events = 1;
-    //capa.can_generate_garbage_collection_events = 1;
-    //capa.can_generate_object_free_events = 1;
-    //capa.can_generate_vm_object_alloc_events = 1;
+    if(mode>1){
+        capa.can_tag_objects = 1;
+        capa.can_generate_all_class_hook_events = 1;
+        capa.can_generate_compiled_method_load_events = 1;
+    }else if(mode==0){
+        capa.can_generate_sampled_object_alloc_events = 1;
+        capa.can_generate_garbage_collection_events = 1;
+        //capa.can_generate_object_free_events = 1;
+        //capa.can_generate_vm_object_alloc_events = 1;
+    }
     jvmti->AddCapabilities(&capa);
 }
-void registerCall(jvmtiEnv* jvmti){
+void registerCall(int mode){
     jvmtiEventCallbacks call = {0};
-    //call.SampledObjectAlloc = SampledObjectAlloc;
-    //call.DataDumpRequest = DataDumpRequest;
-    //call.VMDeath = VMDeath;
-    //call.GarbageCollectionStart = GarbageCollectionStart;
-    //call.GarbageCollectionFinish = GarbageCollectionFinish;
-    call.CompiledMethodLoad = CompiledMethodLoad;
-    call.CompiledMethodUnload = CompiledMethodUnload;
-    call.DynamicCodeGenerated = DynamicCodeGenerated;
+    if(mode>1){
+        call.CompiledMethodLoad = CompiledMethodLoad;
+        call.CompiledMethodUnload = CompiledMethodUnload;
+        call.DynamicCodeGenerated = DynamicCodeGenerated;
+    }else if(mode==0){
+        call.SampledObjectAlloc = SampledObjectAlloc;
+        //call.DataDumpRequest = DataDumpRequest;
+        //call.VMDeath = VMDeath;
+        //call.GarbageCollectionStart = GarbageCollectionStart;
+        call.GarbageCollectionFinish = GarbageCollectionFinish;
+    }
     jvmti->SetEventCallbacks(&call, sizeof(call));
 }
-void enableEvent(jvmtiEnv* jvmti){
-    //jvmti->SetEventNotificationMode(JVMTI_ENABLE, JVMTI_EVENT_SAMPLED_OBJECT_ALLOC, NULL);
-    //jvmti->SetEventNotificationMode(JVMTI_ENABLE, JVMTI_EVENT_DATA_DUMP_REQUEST, NULL);
-    //jvmti->SetEventNotificationMode(JVMTI_ENABLE, JVMTI_EVENT_VM_DEATH, NULL);
-    //jvmti->SetEventNotificationMode(JVMTI_ENABLE, JVMTI_EVENT_GARBAGE_COLLECTION_START, NULL);
-    //jvmti->SetEventNotificationMode(JVMTI_ENABLE, JVMTI_EVENT_GARBAGE_COLLECTION_FINISH, NULL);
+void enableEvent(int mode){
+    if(mode>1){
+        jvmti->SetEventNotificationMode(JVMTI_ENABLE, JVMTI_EVENT_COMPILED_METHOD_LOAD, NULL);
+        jvmti->SetEventNotificationMode(JVMTI_ENABLE, JVMTI_EVENT_COMPILED_METHOD_UNLOAD, NULL);
+        jvmti->SetEventNotificationMode(JVMTI_ENABLE, JVMTI_EVENT_DYNAMIC_CODE_GENERATED, NULL);
 
-    jvmti->SetEventNotificationMode(JVMTI_ENABLE, JVMTI_EVENT_COMPILED_METHOD_LOAD, NULL);
-    jvmti->SetEventNotificationMode(JVMTI_ENABLE, JVMTI_EVENT_COMPILED_METHOD_UNLOAD, NULL);
-    jvmti->SetEventNotificationMode(JVMTI_ENABLE, JVMTI_EVENT_DYNAMIC_CODE_GENERATED, NULL);
-
-    jvmti->GenerateEvents(JVMTI_EVENT_DYNAMIC_CODE_GENERATED);
-    jvmti->GenerateEvents(JVMTI_EVENT_COMPILED_METHOD_LOAD);
+        jvmti->GenerateEvents(JVMTI_EVENT_DYNAMIC_CODE_GENERATED);
+        jvmti->GenerateEvents(JVMTI_EVENT_COMPILED_METHOD_LOAD);
+    }else if(mode==0){
+        jvmti->SetEventNotificationMode(JVMTI_ENABLE, JVMTI_EVENT_SAMPLED_OBJECT_ALLOC, NULL);
+        //jvmti->SetEventNotificationMode(JVMTI_ENABLE, JVMTI_EVENT_DATA_DUMP_REQUEST, NULL);
+        //jvmti->SetEventNotificationMode(JVMTI_ENABLE, JVMTI_EVENT_VM_DEATH, NULL);
+        //jvmti->SetEventNotificationMode(JVMTI_ENABLE, JVMTI_EVENT_GARBAGE_COLLECTION_START, NULL);
+        jvmti->SetEventNotificationMode(JVMTI_ENABLE, JVMTI_EVENT_GARBAGE_COLLECTION_FINISH, NULL);
+    }
+}
+void RegisterMemoryAlloc(){
+    registerCapa(0);
+    registerCall(0);
+    enableEvent(0);
+    jvmti->SetHeapSamplingInterval(1024*1024); //1m
 }
 void gen_perf_file(){
-    registerCapa(jvmti);
-    registerCall(jvmti);
-    enableEvent(jvmti);
+    registerCapa(2);
+    registerCall(2);
+    enableEvent(2);
 }
 int do_single_options(string k, string v, jvmtiEnv* jvmti){
     if (k.compare("sample_duration") == 0){
@@ -768,19 +810,21 @@ int do_single_options(string k, string v, jvmtiEnv* jvmti){
         COUNT_TOP_N=stoi(v);
     }else if(k.compare("lat_top")==0){
         LAT_TOP_N=stoi(v);
-    }else if(k.compare("sample_cpu")==0){
-        gen_perf_file();
-        out_cpu = fopen(v.c_str(), "w");
+    }else if(k.compare("sample_mem")==0){
+        RegisterMemoryAlloc();
         return 0;
-    }else if(k.compare("sample_method")==0){
+    }else if(k.compare("flame")==0){
         gen_perf_file();
         out_cpu = fopen(v.c_str(), "w");
         return 1;
+    }else if(k.compare("sample_method")==0){
+        gen_perf_file();
+        out_cpu = fopen(v.c_str(), "w");
+        return 2;
     }else if(k.compare("sample_thread")==0){
         out_thread = fopen(v.c_str(), "w");
-        return 2;
+        return 3;
     }
-    //jvmti->SetHeapSamplingInterval(1024*1024); //1m
     return -1;
 }
 void InitFile() {
@@ -797,7 +841,7 @@ JNIEXPORT jint JNICALL Agent_OnLoad(JavaVM* vm, char* options, void* reserved) {
     InitFile();
     genbpftextmap();
     vm->GetEnv((void**) &jvmti, JVMTI_VERSION_1_0);
-    jvmti->CreateRawMonitor("tree_lock", &tree_lock);
+    //jvmti->CreateRawMonitor("tree_lock", &tree_lock);
     int id = -1;
     if (options != NULL) {
         vector<string> vkv = parse_options(string(options),';');
@@ -810,10 +854,17 @@ JNIEXPORT jint JNICALL Agent_OnLoad(JavaVM* vm, char* options, void* reserved) {
         }
     }
     cout << "|***************************************|"<< endl;
-    StartBPF(id);
-    StopBPF();
-    PrintBPF(id);
-    //fclose(out_mem);
+    if (id>0){ // BPF enabled
+        StartBPF(id);
+        StopBPF();
+        PrintBPF(id);
+    }else if (id==0){  // sample memory alloc
+        SetupTimer(DURATION, 1, &PrintMemoryMap);
+	//cout<<"sample memory alloc"<<endl;
+	//sleep(DURATION);
+        //PrintMemoryMap(0);
+        //fclose(out_mem);
+    }
     cout << "Done."<< endl;
     return 0;
 }
