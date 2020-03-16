@@ -23,7 +23,7 @@ using namespace std;
 static bool writing_perf = false;
 static FILE* out_cpu;
 static FILE* out_thread;
-//static FILE* out_mem;
+static FILE* out_mem;
 static FILE* out_perf;
 static jvmtiEnv* jvmti = NULL;
 static jrawMonitorID tree_lock;
@@ -389,8 +389,8 @@ void JNICALL SampledObjectAlloc(jvmtiEnv* jvmti, JNIEnv* env, jthread thread,
         string result = method_name+"("+decode_class_signature(string(class_sig)) + ")";
         jvmti->RawMonitorEnter(tree_lock);
         MEM_MAP[result]++;
-        //cout<<"      SampleObjectAlloc() map.size="<<MEM_MAP.size()<<endl;
         jvmti->RawMonitorExit(tree_lock);
+        //cout<<"      SampleObjectAlloc() map.size="<<MEM_MAP.size()<<endl;
     }
     jvmti_free(class_sig);
    
@@ -398,12 +398,14 @@ void JNICALL SampledObjectAlloc(jvmtiEnv* jvmti, JNIEnv* env, jthread thread,
 
 void PrintMemoryMap(int signum){
     cout<<"sampled alloc objects: map.size="<<MEM_MAP.size()<<endl;
-    //if(MEM_MAP.size() >0){
+    if(out_mem != NULL){
+	fprintf(out_mem, "Count \t Method(Class) \n");
         for(auto elem : MEM_MAP){
-            cout << "\t" <<elem.second << "\t" << elem.first << endl;
+            //cout << "\t" <<elem.second << "\t" << elem.first << endl;
+	    fprintf(out_mem, "%d \t %s \n", elem.second, elem.first.c_str() );
         }
         MEM_MAP.clear();
-    //}
+    }
 }
 void SetupTimer(int duration, int interval, __sighandler_t timer_handler){
     struct sigaction sa;
@@ -811,6 +813,7 @@ int do_single_options(string k, string v, jvmtiEnv* jvmti){
     }else if(k.compare("lat_top")==0){
         LAT_TOP_N=stoi(v);
     }else if(k.compare("sample_mem")==0){
+        out_mem = fopen(v.c_str(), "w");
         RegisterMemoryAlloc();
         return 0;
     }else if(k.compare("flame")==0){
@@ -828,7 +831,7 @@ int do_single_options(string k, string v, jvmtiEnv* jvmti){
     return -1;
 }
 void InitFile() {
-    //out_mem = stderr;
+    out_mem = stderr;
     out_cpu = stdout;
     out_thread = stdout;
     string pid = to_string(getpid());
@@ -841,7 +844,7 @@ JNIEXPORT jint JNICALL Agent_OnLoad(JavaVM* vm, char* options, void* reserved) {
     InitFile();
     genbpftextmap();
     vm->GetEnv((void**) &jvmti, JVMTI_VERSION_1_0);
-    //jvmti->CreateRawMonitor("tree_lock", &tree_lock);
+    jvmti->CreateRawMonitor("tree_lock", &tree_lock);
     int id = -1;
     if (options != NULL) {
         vector<string> vkv = parse_options(string(options),';');
@@ -861,9 +864,10 @@ JNIEXPORT jint JNICALL Agent_OnLoad(JavaVM* vm, char* options, void* reserved) {
     }else if (id==0){  // sample memory alloc
         SetupTimer(DURATION, 1, &PrintMemoryMap);
 	//cout<<"sample memory alloc"<<endl;
-	//sleep(DURATION);
+	sleep(DURATION);
         //PrintMemoryMap(0);
-        //fclose(out_mem);
+        fclose(out_mem);
+        out_mem=NULL;
     }
     cout << "Done."<< endl;
     return 0;
