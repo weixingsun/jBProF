@@ -12,12 +12,12 @@ Features:
     
     WHERE $OPTS equals to:
 
-1.Flamegraph: [flame.svg](https://github.com/weixingsun/jBProF/blob/master/flame.svg)
+1.Flamegraph: [flame.svg](https://github.com/weixingsun/jBProF/blob/master/flame.svg)  root required
 
     "sample_duration=3;frequency=49;sample_cpu=cpu.log"
     ./flamegraph.pl cpu.log > flame.svg
 
-2.Thread Sampling: [thread.log](https://github.com/weixingsun/jBProF/blob/master/thread.log)
+2.Thread Sampling: [thread.log](https://github.com/weixingsun/jBProF/blob/master/thread.log)  root required
 
     "sample_duration=3;frequency=49;sample_thread=thread.log"
     
@@ -27,7 +27,7 @@ Features:
     8876	8877	5   	0.32	java
     8876	8878	742 	48.03	ParGC Thread#0
 
-3.Method Sampling: [method.log](https://github.com/weixingsun/jBProF/blob/master/method.log)
+3.Method Sampling: [method.log](https://github.com/weixingsun/jBProF/blob/master/method.log)  root required
 
     "sample_duration=3;sample_top=9;sample_method=method.log"
     "sample_duration=3;sample_top=9;sample_method=method.log;monitor_duration=1;count_top=3"
