@@ -711,13 +711,13 @@ void PrintFlame(){
 
 void PrintBPF(int id){
     switch(id){
-        case 0:
+        case 1:
             PrintFlame();
 	    break;
-        case 1:
+        case 2:
 	    PrintTopMethods(SAMPLE_TOP_N);
 	    break;
-        case 2:
+        case 3:
             PrintThread();
 	    break;
     }
