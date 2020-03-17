@@ -396,14 +396,21 @@ void JNICALL SampledObjectAlloc(jvmtiEnv* jvmti, JNIEnv* env, jthread thread,
    
 }
 
+tm* get_time(){
+    time_t theTime = time(NULL);
+    tm* now = localtime(&theTime);
+    return now;
+}
 void PrintMemoryMap(int signum){
     cout<<"sampled alloc objects: map.size="<<MEM_MAP.size()<<endl;
     if(out_mem != NULL){
-	fprintf(out_mem, "Count \t Method(Class) \n");
+        tm* now = get_time();
+        fprintf(out_mem, "%d:%d:%d\t Count \t Method(Class) \n", now->tm_hour, now->tm_min, now->tm_sec);
         for(auto elem : MEM_MAP){
             //cout << "\t" <<elem.second << "\t" << elem.first << endl;
-	    fprintf(out_mem, "%d \t %s \n", elem.second, elem.first.c_str() );
+            fprintf(out_mem, "\t %d \t %s \n", elem.second, elem.first.c_str() );
         }
+        fflush(out_mem);
         MEM_MAP.clear();
     }
 }
@@ -863,11 +870,10 @@ JNIEXPORT jint JNICALL Agent_OnLoad(JavaVM* vm, char* options, void* reserved) {
         PrintBPF(id);
     }else if (id==0){  // sample memory alloc
         SetupTimer(DURATION, 1, &PrintMemoryMap);
-	//cout<<"sample memory alloc"<<endl;
-	sleep(DURATION);
-        //PrintMemoryMap(0);
-        fclose(out_mem);
-        out_mem=NULL;
+	cout<<"sampling memory alloc..."<<endl;
+	//sleep(DURATION);
+        //fclose(out_mem);
+        //out_mem=NULL;
     }
     cout << "Done."<< endl;
     return 0;
