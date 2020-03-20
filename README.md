@@ -66,11 +66,11 @@ Features:
 	 47 	 java.lang.Integer.toString(java.lang.String) 
 	 25 	 java.lang.Integer.valueOf(java.lang.Integer) 
 	 64 	 java.util.HashMap.newNode(java.util.HashMap$Node) 
-	 5 	     java.util.HashMap.resize(java.util.HashMap$Node[]) 
+	 5 	 java.util.HashMap.resize(java.util.HashMap$Node[]) 
 
-	 Size 	 Count 
-	 >16 	 115 
-	 >32 	 64 
+	 Size            Count 
+	 >16             115 
+	 >32             64 
 	 >262144 	 1 
 	 >2097152 	 1 
 	 >4194304 	 1 
