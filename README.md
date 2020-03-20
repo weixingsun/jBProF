@@ -57,6 +57,33 @@ Features:
     >524288         1	 
     >1048576        2	 
 
+4.Memory sampling: [mem.log](https://github.com/weixingsun/jBProF/blob/master/mem.log) 
+    6:38:28	 Count 	 Method(Class) 
+	 43 	 java.lang.Integer.toString(byte) 
+	 47 	 java.lang.Integer.toString(java.lang.String) 
+	 25 	 java.lang.Integer.valueOf(java.lang.Integer) 
+	 64 	 java.util.HashMap.newNode(java.util.HashMap$Node) 
+	 5 	     java.util.HashMap.resize(java.util.HashMap$Node[]) 
+
+	 Size 	 Count 
+	 >16 	 115 
+	 >32 	 64 
+	 >262144 	 1 
+	 >2097152 	 1 
+	 >4194304 	 1 
+	 >8388608 	 1 
+	 >16777216 	 1 
+    6:38:30	 Count 	 Method(Class) 
+	 15 	 java.lang.Integer.toString(byte) 
+	 17 	 java.lang.Integer.toString(java.lang.String) 
+	 13 	 java.lang.Integer.valueOf(java.lang.Integer) 
+	 34 	 java.util.HashMap.newNode(java.util.HashMap$Node) 
+
+	 Size 	 Count 
+	 >16 	 45 
+	 >32 	 34 
+    6:38:31	 Count 	 Method(Class) 
+	 Size 	 Count 
 
 Install:
 
