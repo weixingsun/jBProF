@@ -62,7 +62,9 @@ if [ $? = 0 ]; then
     #run_and_attach $AGENT "sample_duration=3;sample_top=9;sample_method=method.log"
     #run_and_attach $AGENT "sample_duration=3;sample_top=9;sample_method=method.log;monitor_duration=1;count_top=1"
     #run_and_attach $AGENT "sample_duration=3;sample_top=9;sample_method=method.log;monitor_duration=1;lat_top=2"
-    run_with_agent $AGENT "sample_duration=3;sample_mem=mem.log"
+
+    #run_with_agent $AGENT "sample_duration=10;sample_mem=mem.log;mon_field=java.util.HashMap@size@I"
+    run_with_agent $AGENT "sample_duration=10;sample_mem=mem.log;mon_size=1"
     #grep Main.loop /tmp/perf-*.map
     #perf top
     #/usr/share/bcc/tools/funclatency -d 3 c:malloc

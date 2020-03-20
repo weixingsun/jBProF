@@ -9,6 +9,7 @@
 #include <sstream>
 #include <signal.h>
 #include <stdarg.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <sys/time.h>
 #include <unistd.h>
@@ -32,13 +33,20 @@ static int SAMPLE_TOP_N = 20;
 static int COUNT_TOP_N = 0;
 static int LAT_TOP_N = 0;
 static int BPF_PERF_FREQ = 49;
-static int DURATION = 10;
-static int MON_DURATION = 5;
+static int SAMPLE_DURATION = 10;
+static int TOP_DURATION = 5;
 static int BP_SEQ = 1;
+static string MON_JAVA_CLASS = "";
+static string MON_JAVA_FIELD = "";
+static string MON_JAVA_FIELD_TYPE = "";
+static int MON_SIZE = -1;
+static int MON_TOP_SIZE = -1;
 static ebpf::BPF bpf;
 static map<int,string> BPF_TXT_MAP;
 static map<int,string> BPF_FN_MAP;
 static map<string,int> MEM_MAP;
+static map<uint32_t,uint32_t> INT_FIELD_MAP;
+static map<uint32_t,uint32_t> SIZE_MAP;
 
 struct Frame {
     jlong samples;
@@ -284,6 +292,14 @@ int do_perf_event_method(struct bpf_perf_event_data *ctx) {
     return 0;
 }
 )";
+static inline uint32_t log2(const uint32_t x) {
+  uint32_t y;
+  asm ( "\tbsr %1, %0\n"
+      : "=r"(y)
+      : "r" (x)
+  );
+  return y;
+}
 void genbpftextmap(){
     BPF_TXT_MAP[0]=BPF_TXT_FLM;
     BPF_TXT_MAP[1]=BPF_TXT_MTD;
@@ -304,9 +320,16 @@ static jlong get_time(jvmtiEnv* jvmti) {
     jvmti->GetTime(&current_time);
     return current_time;
 }
-
+static string decode_object_sig(string class_sig){
+    // rm first 'L' and last ';'
+    class_sig.erase(0, 1);
+    class_sig.pop_back();
+    //class_sig.substr(1,class_sig.size()-2);
+    // Replace '/' with '.'
+    replace( class_sig.begin(), class_sig.end(), '/', '.' );
+    return class_sig;
+}
 static string decode_class_signature(string class_sig) {
-    //Lorg/net/XX  [O
     switch (class_sig[1]) {
         case 'B': return "byte";
         case 'C': return "char";
@@ -316,14 +339,14 @@ static string decode_class_signature(string class_sig) {
         case 'J': return "long";
         case 'S': return "short";
         case 'Z': return "boolean";
+        //case 'L': return decode_object_sig(class_sig);
+        case '[': return decode_class_signature(class_sig.erase(0,1))+"[][]";
     }
-    // rm first 'L' and last ';'
-    class_sig.erase(0, 1);
-    class_sig.pop_back();
-    //class_sig.substr(1,class_sig.size()-2);
-    // Replace '/' with '.'
-    replace( class_sig.begin(), class_sig.end(), '/', '.' );
-    return class_sig;
+    switch (class_sig[0]){
+        case '[': return decode_object_sig(class_sig.erase(0,1))+"[]";
+        case 'L': return decode_object_sig(class_sig);
+    }
+    return "Unknown";
 }
 void jvmti_free(char* ptr){
     if (ptr != NULL) jvmti->Deallocate((unsigned char*) ptr);
@@ -340,34 +363,9 @@ static string get_method_name(jmethodID method) {
         jvmti_free(method_name);
         jvmti_free(class_sig);
         return result;
-        //return decode_class_signature(string(class_sig)) + "." + method_name;
     } else {
         return "(NONAME)";
     }
-}
-
-static void write_line(const string stack_line, const string& class_name, const Frame* f) {
-    if (f->samples > 0) {
-        //fprintf(out_mem, "%s %s_[%ld] \n", stack_line.c_str(), class_name.c_str(), f->samples);
-    }
-    for (auto it = f->children.begin(); it != f->children.end(); ++it) {
-        write_line(stack_line + get_method_name(it->first) + ";", class_name, &it->second);
-    }
-}
-
-static void write_loop_root() {
-    for (auto it = root.begin(); it != root.end(); ++it) {
-        write_line("", it->first, &it->second);
-    }
-}
-
-static void record_stack_trace(char* class_sig, jvmtiFrameInfo* frames, jint count, jlong size) {
-    Frame* f = &root[decode_class_signature(class_sig)];
-    while (--count >= 0) {
-        f = &f->children[frames[count].method];
-    }
-    f->samples++;
-    f->bytes += size;
 }
 
 string getCallerMethodName(jthread thread){
@@ -381,19 +379,60 @@ string getCallerMethodName(jthread thread){
         return "(NONAME)";
     }
 }
-void JNICALL SampledObjectAlloc(jvmtiEnv* jvmti, JNIEnv* env, jthread thread,
-                                jobject object, jclass klass, jlong size) {
+/*
+ +---+---------+
+ | Z | boolean |
+ | B | byte    |
+ | C | char    |
+ | S | short   |
+ | I | int     |
+ | J | long    |
+ | F | float   |
+ | D | double  |
+
+ | Ljava.lang/String; | String |
+ +-------------+
+*/
+jint getArraySize(JNIEnv* env, jclass klass, jobject obj){
+    jfieldID f = env->GetFieldID(klass, "length", "I");
+    jint v = env->GetIntField (obj, f);
+    //printf ("type: %s, field: %s, value: %d\n", field_type.c_str(), field_name.c_str(), v);
+    return v;
+}
+jint getIntValue(JNIEnv* env, jclass klass, jobject obj, string field_name, string field_type){
+    jfieldID f = env->GetFieldID(klass, field_name.c_str(), field_type.c_str());
+    jint v = env->GetIntField (obj, f);
+    //printf ("type: %s, field: %s, value: %d\n", field_type.c_str(), field_name.c_str(), v);
+    return v;
+}
+void JNICALL SampledObjectAlloc(jvmtiEnv* jvmti, JNIEnv* env, jthread thread, jobject object, jclass klass, jlong size) {
     char* class_sig = NULL;
     if (jvmti->GetClassSignature(klass, &class_sig, NULL) ==0 ){
+        string class_name = decode_class_signature(string(class_sig));
         string method_name = getCallerMethodName(thread);
-        string result = method_name+"("+decode_class_signature(string(class_sig)) + ")";
+        string result = method_name+"("+class_name + ")";
         jvmti->RawMonitorEnter(tree_lock);
         MEM_MAP[result]++;
         jvmti->RawMonitorExit(tree_lock);
-        //cout<<"      SampleObjectAlloc() map.size="<<MEM_MAP.size()<<endl;
+        if(MON_JAVA_CLASS.length()>0 && class_name == MON_JAVA_CLASS){ //find(MON_JAVA_CLASS) != string::npos
+            if(MON_JAVA_FIELD.length() > 0){
+                jint v = getIntValue(env,klass,object, MON_JAVA_FIELD,MON_JAVA_FIELD_TYPE);
+                uint32_t key = log2(v);
+                jvmti->RawMonitorEnter(tree_lock);
+                INT_FIELD_MAP[key]++;
+                jvmti->RawMonitorExit(tree_lock);
+            }else{
+                uint32_t key = log2(size);
+                jvmti->RawMonitorEnter(tree_lock);
+                INT_FIELD_MAP[key]++;
+                jvmti->RawMonitorExit(tree_lock);
+            }
+        }else if(MON_SIZE > 0){
+            uint32_t key = log2(size);
+            SIZE_MAP[key]++;
+        }
     }
     jvmti_free(class_sig);
-   
 }
 
 tm* get_time(){
@@ -410,8 +449,24 @@ void PrintMemoryMap(int signum){
             //cout << "\t" <<elem.second << "\t" << elem.first << endl;
             fprintf(out_mem, "\t %d \t %s \n", elem.second, elem.first.c_str() );
         }
-        fflush(out_mem);
         MEM_MAP.clear();
+        if(MON_JAVA_CLASS.length()>0){
+	    //cout<<"sampled field: map.size="<<INT_FIELD_MAP.size()<<endl;
+            fprintf(out_mem, "\n\t Size \t Count \n" );
+            for(auto elem : INT_FIELD_MAP){
+                fprintf(out_mem, "\t >%ld \t %d \n", (long)exp2(elem.first), elem.second );
+            }
+            INT_FIELD_MAP.clear();
+        }
+        if(MON_SIZE>0){
+	    //cout<<"sampled size_map: map.size="<<SIZE_MAP.size()<<endl;
+            fprintf(out_mem, "\n\t Size \t Count \n" );
+            for(auto elem : SIZE_MAP){
+                fprintf(out_mem, "\t >%ld \t %d \n", (long)exp2(elem.first), elem.second );
+            }
+            SIZE_MAP.clear();
+        }
+        fflush(out_mem);
     }
 }
 void SetupTimer(int duration, int interval, __sighandler_t timer_handler){
@@ -422,32 +477,27 @@ void SetupTimer(int duration, int interval, __sighandler_t timer_handler){
     sa.sa_handler = timer_handler;
     sigaction (SIGVTALRM, &sa, NULL);
 
-    timer.it_value.tv_sec = duration;
+    //start after 1 second
+    timer.it_value.tv_sec = 1;
     timer.it_value.tv_usec = 0;
     timer.it_interval.tv_sec = interval;
     timer.it_interval.tv_usec = 0;
     setitimer (ITIMER_VIRTUAL, &timer, NULL);
 }
-void JNICALL DataDumpRequest(jvmtiEnv* jvmti) {
-    jvmti->RawMonitorEnter(tree_lock);
-    write_loop_root();
-    jvmti->RawMonitorExit(tree_lock);
-}
 
 void JNICALL VMDeath(jvmtiEnv* jvmti, JNIEnv* env) {
-    DataDumpRequest(jvmti);
+    //trace(jvmti_env, "VM exited");
 }
 
 void JNICALL GarbageCollectionStart(jvmtiEnv *jvmti) {
-    DataDumpRequest(jvmti);
+    //trace(jvmti_env, "GC started");
 }
 
 void JNICALL GarbageCollectionFinish(jvmtiEnv *jvmti_env) {
-    DataDumpRequest(jvmti);
     //trace(jvmti_env, "GC finished");
 }
 void JNICALL CompiledMethodLoad(jvmtiEnv *jvmti, jmethodID method, jint code_size,
-		const void* code_addr, jint map_length, const jvmtiAddrLocationMap* map, const void* compile_info){
+     const void* code_addr, jint map_length, const jvmtiAddrLocationMap* map, const void* compile_info){
     if (out_perf!=NULL && !writing_perf){
 	string method_name = get_method_name(method);
 	//fprintf(stdout, "method_name:  %s \n", method_name );
@@ -516,10 +566,10 @@ void StartBPF(int id) {
     }else{
         cout << "attached fn:"<<fn <<" to pid:" << pid << " perf event "<< endl;
     }
-    cout << "BPF sampling " << DURATION << " seconds" << endl;
+    cout << "BPF sampling " << SAMPLE_DURATION << " seconds" << endl;
 }
 void StopBPF(){
-    sleep(DURATION);
+    sleep(SAMPLE_DURATION);
     if (out_perf!=NULL){
         writing_perf=true;
         fclose(out_perf);
@@ -592,8 +642,8 @@ void CountMethods(method_type methods[], int n){
         peas[j]  =AttachBreakPoint(methods[i].addr, "do_bp_count", i);
         peas[j+1]=AttachBreakPoint(methods[i].ret, "do_ret_count", i);
     }
-    cout<<"counting "<< n <<" methods for "<<MON_DURATION<<" second"<<endl;
-    sleep(MON_DURATION);
+    cout<<"counting "<< n <<" methods for "<<TOP_DURATION<<" second"<<endl;
+    sleep(TOP_DURATION);
 
     for (perf_event_attr attr : peas){
         DetachBreakPoint(&attr);
@@ -605,8 +655,8 @@ void LatencyMethod(method_type method){
     perf_event_attr peas[2];
     peas[0]  =AttachBreakPoint(method.addr, "func_entry", 0);
     peas[1]=AttachBreakPoint(method.ret, "func_return", 0);
-    cout<<"latency measuring for "<<MON_DURATION<<" second"<<endl;
-    sleep(MON_DURATION);
+    cout<<"latency measuring for "<<TOP_DURATION<<" second"<<endl;
+    sleep(TOP_DURATION);
     DetachBreakPoint(&peas[0]);
     DetachBreakPoint(&peas[1]);
     auto dist = bpf.get_hash_table<uint64_t, uint64_t>("dist").get_table_offline();
@@ -729,7 +779,7 @@ void PrintBPF(int id){
 	    break;
     }
 }
-vector<string> parse_options(string str, char sep){
+vector<string> str_2_vec(string str, char sep){
     istringstream ss(str);
     vector<string> kv;
     string sub;
@@ -808,9 +858,9 @@ void gen_perf_file(){
 }
 int do_single_options(string k, string v, jvmtiEnv* jvmti){
     if (k.compare("sample_duration") == 0){
-        DURATION=stoi(v);
-    }else if(k.compare("monitor_duration")==0){
-        MON_DURATION=stoi(v);
+        SAMPLE_DURATION=stoi(v);
+    }else if(k.compare("top_duration")==0){
+        TOP_DURATION=stoi(v);
     }else if(k.compare("frequency")==0){
         BPF_PERF_FREQ=stoi(v);
     }else if(k.compare("sample_top")==0){
@@ -822,6 +872,18 @@ int do_single_options(string k, string v, jvmtiEnv* jvmti){
     }else if(k.compare("sample_mem")==0){
         out_mem = fopen(v.c_str(), "w");
         RegisterMemoryAlloc();
+        return 0;
+    }else if(k.compare("mon_size_top")==0){
+        MON_TOP_SIZE = stoi(v);
+    }else if(k.compare("mon_size")==0){
+        MON_SIZE = stoi(v);
+    }else if(k.compare("mon_field")==0){
+        // java.util.HashMap@size@I
+        vector<string> vs= str_2_vec(v,'@');
+        MON_JAVA_CLASS = vs[0];
+        MON_JAVA_FIELD = vs[1];
+        MON_JAVA_FIELD_TYPE = vs[2];
+        cout << "class=" << MON_JAVA_CLASS << "   field=" << MON_JAVA_FIELD <<  "   type=" << MON_JAVA_FIELD_TYPE << endl;
         return 0;
     }else if(k.compare("flame")==0){
         gen_perf_file();
@@ -854,7 +916,7 @@ JNIEXPORT jint JNICALL Agent_OnLoad(JavaVM* vm, char* options, void* reserved) {
     jvmti->CreateRawMonitor("tree_lock", &tree_lock);
     int id = -1;
     if (options != NULL) {
-        vector<string> vkv = parse_options(string(options),';');
+        vector<string> vkv = str_2_vec(string(options),';');
         for (string kv : vkv){
             string k = get_key(kv, "=");
             string v = get_value(kv, "=");
@@ -869,7 +931,7 @@ JNIEXPORT jint JNICALL Agent_OnLoad(JavaVM* vm, char* options, void* reserved) {
         StopBPF();
         PrintBPF(id);
     }else if (id==0){  // sample memory alloc
-        SetupTimer(DURATION, 1, &PrintMemoryMap);
+        SetupTimer(SAMPLE_DURATION, 1, &PrintMemoryMap);
 	cout<<"sampling memory alloc..."<<endl;
 	//sleep(DURATION);
         //fclose(out_mem);
