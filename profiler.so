@@ -26,8 +26,9 @@ static FILE* out_cpu;
 static FILE* out_thread;
 static FILE* out_mem;
 static FILE* out_perf;
+static JNIEnv* jni = NULL;
 static jvmtiEnv* jvmti = NULL;
-static jrawMonitorID tree_lock;
+static jrawMonitorID lock;
 
 static int SAMPLE_TOP_N = 20;
 static int COUNT_TOP_N = 0;
@@ -393,12 +394,6 @@ string getCallerMethodName(jthread thread){
  | Ljava.lang/String; | String |
  +-------------+
 */
-jint getArraySize(JNIEnv* env, jclass klass, jobject obj){
-    jfieldID f = env->GetFieldID(klass, "length", "I");
-    jint v = env->GetIntField (obj, f);
-    //printf ("type: %s, field: %s, value: %d\n", field_type.c_str(), field_name.c_str(), v);
-    return v;
-}
 jint getIntValue(JNIEnv* env, jclass klass, jobject obj, string field_name, string field_type){
     jfieldID f = env->GetFieldID(klass, field_name.c_str(), field_type.c_str());
     jint v = env->GetIntField (obj, f);
@@ -411,21 +406,21 @@ void JNICALL SampledObjectAlloc(jvmtiEnv* jvmti, JNIEnv* env, jthread thread, jo
         string class_name = decode_class_signature(string(class_sig));
         string method_name = getCallerMethodName(thread);
         string result = method_name+"("+class_name + ")";
-        jvmti->RawMonitorEnter(tree_lock);
+        jvmti->RawMonitorEnter(lock);
         MEM_MAP[result]++;
-        jvmti->RawMonitorExit(tree_lock);
+        jvmti->RawMonitorExit(lock);
         if(MON_JAVA_CLASS.length()>0 && class_name == MON_JAVA_CLASS){ //find(MON_JAVA_CLASS) != string::npos
             if(MON_JAVA_FIELD.length() > 0){
                 jint v = getIntValue(env,klass,object, MON_JAVA_FIELD,MON_JAVA_FIELD_TYPE);
                 uint32_t key = log2(v);
-                jvmti->RawMonitorEnter(tree_lock);
+                jvmti->RawMonitorEnter(lock);
                 INT_FIELD_MAP[key]++;
-                jvmti->RawMonitorExit(tree_lock);
+                jvmti->RawMonitorExit(lock);
             }else{
                 uint32_t key = log2(size);
-                jvmti->RawMonitorEnter(tree_lock);
+                jvmti->RawMonitorEnter(lock);
                 INT_FIELD_MAP[key]++;
-                jvmti->RawMonitorExit(tree_lock);
+                jvmti->RawMonitorExit(lock);
             }
         }else if(MON_SIZE > 0){
             uint32_t key = log2(size);
@@ -510,6 +505,25 @@ void JNICALL CompiledMethodUnload(jvmtiEnv *jvmti_env, jmethodID method, const v
 void JNICALL DynamicCodeGenerated(jvmtiEnv *jvmti, const char* method_name, const void* code_addr, jint code_size) {
     if (out_perf!=NULL && !writing_perf){
         fprintf(out_perf, "%lx %x %s\n", (unsigned long) code_addr, code_size, method_name);
+    }
+}
+// replace_string(s,'/','_')
+string replace_string(string text, char t, char s){
+    replace(text.begin(), text.end(), t, s);
+    return text;
+}
+void JNICALL ClassFileLoadHook(jvmtiEnv *jvmti, JNIEnv* jni, jclass class_being_redefined, jobject loader,
+		const char* name, jobject protection_domain, 
+		jint class_data_len, const unsigned char* class_data,
+		jint* new_class_data_len, unsigned char** new_class_data){
+    if(string(name).find("HashMap") != string::npos ){
+        cout<<"ClassFileLoadHook: ["<< class_data_len<<"]"<<name<<endl;
+	string file_name = replace_string(string(name),'/','_')+".class";
+	FILE *file = fopen(file_name.c_str(), "wb");
+        jvmti->RawMonitorEnter(lock);
+	fwrite(class_data,1,class_data_len, file);
+	fclose(file);
+        jvmti->RawMonitorExit(lock);
     }
 }
 /////////////////////////////////////////////////////////////////////////
@@ -800,6 +814,31 @@ bool str_contains(string s, string k){
     return s.find(k)==0;
 }
 ///////////////////////////////////////////
+float get_static_field_float(JNIEnv* jni, string cls_name, string field_name, string field_type){
+    jclass cls = jni->FindClass(cls_name.c_str());
+    jfieldID f = jni->GetStaticFieldID(cls, field_name.c_str(), field_name.c_str());
+    //jfloat v = jni->GetStaticFloatField(cls,f);
+    jfloat v = jni->GetFloatField(cls,f);
+    return v;
+}
+void set_static_field_float(JNIEnv* jni, string cls_name, string field_name, string field_type, float value){
+    jclass cls = jni->FindClass(cls_name.c_str());
+    jfieldID f = jni->GetStaticFieldID(cls, field_name.c_str(), field_name.c_str());
+    //jint v = env->GetIntField (obj, f);
+    jni->SetStaticFloatField(cls,f,value);
+    cout<<"set_static_field() "<<cls_name<<"."<<field_name<<"("<<field_type<<")="<<value<<endl;
+}
+void VMInit(jvmtiEnv *jvmti, JNIEnv* jni, jthread thread) {
+    //oop_access_barrier
+    //set_static_field_float(jni, "java.util.HashMap", "DEFAULT_LOAD_FACTOR", "F", 0.75f);
+    //float load_factor = get_static_field_float(jni, "java.util.HashMap", "DEFAULT_LOAD_FACTOR", "F" );
+    //float load_factor = get_static_field_float(jni, "java.util.HashMap", "loadFactor", "F" );
+    //cout<<"java.util.HashMap.loadFactor ="<<load_factor<<endl;
+    jvmti->RawMonitorEnter(lock);
+    jclass obj = jni->FindClass("java/util/HashMap");
+    jvmti->RetransformClasses(1, &obj);
+    jvmti->RawMonitorExit(lock);
+}
 void registerCapa(int mode){
     jvmtiCapabilities capa = {0};
     if(mode>1){
@@ -811,38 +850,48 @@ void registerCapa(int mode){
         capa.can_generate_garbage_collection_events = 1;
         //capa.can_generate_object_free_events = 1;
         //capa.can_generate_vm_object_alloc_events = 1;
+	capa.can_redefine_classes = 1;
+	capa.can_redefine_any_class = 1;
+	capa.can_retransform_classes = 1;
+	capa.can_retransform_any_class = 1;
     }
     jvmti->AddCapabilities(&capa);
 }
 void registerCall(int mode){
     jvmtiEventCallbacks call = {0};
     if(mode>1){
+        call.VMInit = VMInit;
         call.CompiledMethodLoad = CompiledMethodLoad;
         call.CompiledMethodUnload = CompiledMethodUnload;
         call.DynamicCodeGenerated = DynamicCodeGenerated;
     }else if(mode==0){
+        call.VMInit = VMInit;
         call.SampledObjectAlloc = SampledObjectAlloc;
-        //call.DataDumpRequest = DataDumpRequest;
-        //call.VMDeath = VMDeath;
         //call.GarbageCollectionStart = GarbageCollectionStart;
-        call.GarbageCollectionFinish = GarbageCollectionFinish;
+        call.ClassFileLoadHook = ClassFileLoadHook;
     }
     jvmti->SetEventCallbacks(&call, sizeof(call));
 }
+void disableAllEvents(){
+	jvmti->SetEventNotificationMode(JVMTI_DISABLE, JVMTI_EVENT_VM_INIT, NULL);
+	jvmti->SetEventNotificationMode(JVMTI_DISABLE, JVMTI_EVENT_COMPILED_METHOD_LOAD, NULL);
+	jvmti->SetEventNotificationMode(JVMTI_DISABLE, JVMTI_EVENT_DYNAMIC_CODE_GENERATED, NULL);
+	jvmti->SetEventNotificationMode(JVMTI_DISABLE, JVMTI_EVENT_SAMPLED_OBJECT_ALLOC, NULL);
+}
 void enableEvent(int mode){
     if(mode>1){
+        jvmti->SetEventNotificationMode(JVMTI_ENABLE, JVMTI_EVENT_VM_INIT, NULL);
         jvmti->SetEventNotificationMode(JVMTI_ENABLE, JVMTI_EVENT_COMPILED_METHOD_LOAD, NULL);
-        jvmti->SetEventNotificationMode(JVMTI_ENABLE, JVMTI_EVENT_COMPILED_METHOD_UNLOAD, NULL);
+        //jvmti->SetEventNotificationMode(JVMTI_ENABLE, JVMTI_EVENT_COMPILED_METHOD_UNLOAD, NULL);
         jvmti->SetEventNotificationMode(JVMTI_ENABLE, JVMTI_EVENT_DYNAMIC_CODE_GENERATED, NULL);
 
         jvmti->GenerateEvents(JVMTI_EVENT_DYNAMIC_CODE_GENERATED);
         jvmti->GenerateEvents(JVMTI_EVENT_COMPILED_METHOD_LOAD);
     }else if(mode==0){
+        jvmti->SetEventNotificationMode(JVMTI_ENABLE, JVMTI_EVENT_VM_INIT, NULL);
         jvmti->SetEventNotificationMode(JVMTI_ENABLE, JVMTI_EVENT_SAMPLED_OBJECT_ALLOC, NULL);
-        //jvmti->SetEventNotificationMode(JVMTI_ENABLE, JVMTI_EVENT_DATA_DUMP_REQUEST, NULL);
-        //jvmti->SetEventNotificationMode(JVMTI_ENABLE, JVMTI_EVENT_VM_DEATH, NULL);
-        //jvmti->SetEventNotificationMode(JVMTI_ENABLE, JVMTI_EVENT_GARBAGE_COLLECTION_START, NULL);
-        jvmti->SetEventNotificationMode(JVMTI_ENABLE, JVMTI_EVENT_GARBAGE_COLLECTION_FINISH, NULL);
+        //jvmti->SetEventNotificationMode(JVMTI_ENABLE, JVMTI_EVENT_GARBAGE_COLLECTION_FINISH, NULL);
+        jvmti->SetEventNotificationMode(JVMTI_ENABLE, JVMTI_EVENT_CLASS_FILE_LOAD_HOOK, NULL);
     }
 }
 void RegisterMemoryAlloc(){
@@ -899,6 +948,12 @@ int do_single_options(string k, string v, jvmtiEnv* jvmti){
     }
     return -1;
 }
+void closeAllFiles() {
+    //fclose(out_mem);
+    //fclose(out_cpu);
+    //fclose(out_thread);
+    //fclose(out_perf);
+}
 void InitFile() {
     out_mem = stderr;
     out_cpu = stdout;
@@ -913,7 +968,9 @@ JNIEXPORT jint JNICALL Agent_OnLoad(JavaVM* vm, char* options, void* reserved) {
     InitFile();
     genbpftextmap();
     vm->GetEnv((void**) &jvmti, JVMTI_VERSION_1_0);
-    jvmti->CreateRawMonitor("tree_lock", &tree_lock);
+    //vm->GetEnv((void **) &jni, JNI_VERSION_1_6);
+    jvmti->CreateRawMonitor("jvmti_lock", &lock);
+    
     int id = -1;
     if (options != NULL) {
         vector<string> vkv = str_2_vec(string(options),';');
@@ -941,6 +998,11 @@ JNIEXPORT jint JNICALL Agent_OnLoad(JavaVM* vm, char* options, void* reserved) {
     return 0;
 }
 
+JNIEXPORT void JNICALL Agent_OnUnload(JavaVM *vm){
+    cout<<"Agent Unload."<<endl;
+    disableAllEvents();
+    closeAllFiles();
+}
 JNIEXPORT jint JNICALL Agent_OnAttach(JavaVM* vm, char* options, void* reserved) {
     if (jvmti != NULL) {
         return 0;
