@@ -1,0 +1,139 @@
+ClassFile {
+    u4             magic;		#CAFEBABE
+    u2             minor_version;       #0000
+    u2             major_version;	#0039
+
+    u2             constant_pool_count;				#0011 (17-1=16)
+    cp_info        constant_pool[constant_pool_count-1];
+	(#1) 0A 0002 0003
+	0A   -> type:   method_ref      // method(<init>()V)
+	0002 -> class:  2
+	0003 -> name:   3
+
+	(#2) 07 0004			// class(java/lang/Object)
+	07   -> type: class
+	0004 -> name: 4
+
+	(#3) 0C 0005 0006		//<init>()V
+	0C   -> type: name&type
+	0005 -> name_idx: 5
+	0006 -> type_idx: 6
+
+	(#4) 01 0010 + 16 (6A617661 2F6C616E 672F4F62 6A656374)	//java/lang/Object
+	01   -> type: utf8
+	0010 -> len:  16
+	+16  -> value: java/lang/Object
+
+	(#5) 01 0006 + 6  (3C696E69 743E)	//<init>
+	01   -> type: utf8
+	0006 -> len:  6
+	+6   -> value: <init>
+
+	(#6) 01 0003 + 3  (282956)		//()V
+	01   -> type: utf8
+	0003 -> len:  3
+	+3   -> value: ()V
+
+	(#7) 07 0008				//class(Test)
+	07   -> type: class
+	0008 -> name_index: 8
+
+	(#8) 01 0004 +4  (54657374)		//Test
+	01   -> type: utf8
+	0004 -> len:  4
+	+4   -> value: Test
+
+	(#9) 01 0007 +7  (44454641 554C54)	//DEFAULT
+	01   -> type: utf8
+	0007 -> len:  7
+	+7   -> value: DEFAULT
+
+	(#10) 01 0001 +1			//I
+	01   -> type: utf8
+	0001 -> len:  1
+	+1   -> value: I
+
+	(#11) 01 000D +13 (436F6E73 74616E74 56616C75 65)	//ConstantValue
+	01   -> type: utf8
+	0001 -> len:  13
+	+13  -> value: 
+
+	(#12) 03 0000 0010
+	03   -> type: int
+	0000 0010 -> value: 16
+
+	(#13) 01 0004 +4 (436F6465)		//Code
+	01   -> type: utf8
+	0004 -> len:  4
+	+4   -> value: Code
+
+	(#14) 01 000F +15 (4C696E65 4E756D62 65725461 626C65)	//LineNumberTable
+	01   -> type: utf8
+	000F -> len:  15
+	+15  -> value: LineNumberTable
+
+	(#15) 01 000A +10 (536F7572 63654669 6C65)	//SourceFile
+	01   -> type: utf8
+	000A -> len:  10
+	+10  -> value: SourceFile
+
+	(#16) 01 0009 +9 (54657374 2E6A6176 61)		//Test.java
+	01   -> type: utf8
+	0009 -> len:  9
+	+9   -> value: Test.java
+
+
+    u2             access_flags;				
+	0021
+    u2             this_class;					
+	0007
+    u2             super_class;
+	0002
+    u2             interfaces_count;
+	0000
+    u2             interfaces[interfaces_count];
+	----
+    u2             fields_count;
+	0001
+    field_info[] {
+        u2             access_flags;
+        u2             name_index;
+        u2             descriptor_index;
+        u2             attributes_count;
+        attributes[];
+		ConstantValue  { u2 name_index, u4 len, u2 value_index }
+    }
+	(#1) 0018 0009 000A 0001 
+	access_flags:		0018		//static final
+	name_index:		0009		//DEFAULT
+	descriptor_index:	000A		//I
+	attributes_count:	0001		//1
+	     000B 0000 0002 000C 
+             name_index:	000B		//(#11) -> ConstantValue
+             len:               0000 0002       //2
+             value:             000C		//#12  ->  16
+
+    u2             methods_count;
+	0001
+    method_info[] {
+        u2             access_flags;
+        u2             name_index;
+        u2             descriptor_index;
+        u2             attributes_count;
+        attribute_info attributes[attributes_count];
+    }
+	(#1) 0001 0005 0006 0001 000D
+	access_flags:		0001		//public
+	name_index:		0005		//<init>
+	descriptor_index:	0006		//()V
+	attributes_count:	0001		//1
+	attributes[]:
+		Code {u2 name_index, u4 len, u2 max_stack, u2 max_locals,u4 code_length, u1 code}  
+	    
+	0000 001D 0001 0001 0000 0005 2AB7 0001 B100 0000 0100 
+	0E00 0000 0600 0100 0000 0100 0100 0F00 0000 0200 10
+
+    u2             attributes_count;
+    attribute_info attributes[attributes_count];
+}
+
