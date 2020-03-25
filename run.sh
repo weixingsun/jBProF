@@ -5,8 +5,8 @@ if [ ! -f $SRC ]; then
 fi
 rm -rf $AGENT log thread.log cpu.log mem.log hs_err* jcmd.log /tmp/perf*  #flame.svg
 kill -9 `ps -ef|grep java|grep -v grep |awk '{print $2}'`
-LOOP=3000000
-JIT="-Xmx300m -Xms300m -XX:+UseParallelOldGC -XX:ParallelGCThreads=1 -XX:+PreserveFramePointer" # -XX:+DTraceMethodProbes" #-XX:+ExtendedDTraceProbes
+LOOP="1000 100000"
+JIT="-Xmx400m -Xms100m -XX:+UseParallelOldGC -XX:ParallelGCThreads=1 -XX:+PreserveFramePointer" # -XX:+DTraceMethodProbes" #-XX:+ExtendedDTraceProbes
 
 JAVA_HOME=/home/sun/jbb/jdk13
 java_build(){
@@ -64,8 +64,9 @@ if [ $? = 0 ]; then
     #run_and_attach $AGENT "sample_duration=3;sample_top=9;sample_method=method.log;monitor_duration=1;lat_top=2"
 
     #run_with_agent $AGENT "sample_duration=10;sample_mem=mem.log;mon_field=Main@loop@I"
-    run_with_agent $AGENT "sample_duration=10;sample_mem=mem.log;mon_size=1"
+    #run_with_agent $AGENT "sample_duration=10;sample_mem=mem.log;mon_size=1"
 
+    run_with_agent $AGENT "sample_duration=10;sample_mem=mem.log;mon_field=java.util.HashMap@DEFAULT_INITIAL_CAPACITY@I"
     echo "rule of thumb: when top functions has HashMap.resize  -> bigger initial_capacity"
     #HashMap.DEFAULT_INITIAL_CAPACITY name#363 length=2, value#364 value=0x00000010 (16) flag=0x0018 (static final), type=I (int)
     #00000010 -> 16
