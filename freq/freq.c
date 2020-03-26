@@ -19,42 +19,58 @@ static int MHZ = 1024;
 	AZ("While reading IA32_MPERF",e);
 	//printf("IA32_MPERF (0xE7) is %Ld\n", (unsigned long long)var);
 
+char* itos(int x){
+    int length = snprintf( NULL, 0, "%d", x );
+    char* str = malloc( length + 1 );
+    snprintf( str, length + 1, "%d", x );
+    return str;
+}
+char* merge3(char* s1, char* s2, char* s3){
+    int n = strlen(s1)+strlen(s2)+strlen(s3);
+    char *s4=malloc(n);
+    snprintf(s4,n,"%s%s%s", s1,s2,s3);
+}
+char* gen_msr_path(int index){
+        char *path1 = "/dev/cpu/";
+        char *path2 = "/msr";
+        char *num = itos(index);
+	int n = strlen(path1)+strlen(path2)+strlen(num)+1;
+        char *path=malloc(n);
+        snprintf(path, n, "%s%d%s", path1,index,path2);
+	//printf("N=%d  PATH1=%s  PATH2=%s  NUM=%s\n", n, path1, path2, num);
+	return path;
+}
 unsigned long cpu_msr_ce(int index){
-	char *path1 = "/dev/cpu/";
-	char *path2 = "/msr\0";
-	int n = strlen(path1)+strlen(path2)+1;
-	char *path=malloc(n);
-	snprintf(path, n, "%s%d%s", path1,index,path2);
+	char *path = gen_msr_path(index);
 	int fd = open(path, O_RDONLY);
 	if (fd < 0) {
 		//perror("Failed to open CE MSR");
 		printf("Failed to open CE MSR %s\n", path);
 		return 0;
 	}
-	printf("Successfully opened %s\n", path);
+	//printf("Successfully opened %s\n", path);
 	unsigned long freq;
 	int e = pread(fd, (void *)&freq, 0x8, 0xCE);
 	AZ("While reading 0xCE", e);
-	//printf("Value returned for pread at offset 0xCE is %Lx\n", freq);
-	printf("Current frequency is %hhd\n", (int)((freq >> 8) & 0xFF));
+	//printf("Value returned for pread at offset 0xCE is %lx\n", freq);
+	unsigned long h = (freq >> 8)&0xFF ;
+	//printf("Value= %lx freq= %hhdG  shift= %lx \n",freq, (int)((freq >> 8) & 0xFF), h );
 
 	if (close(fd) < 0) {
 		perror("While closing 0xCE MSR FD");
-		return 0;
+		return -1;
 	}
-	return freq;
+	//return freq;
+	return h*1024*100;
 }
 unsigned long cpu_msr_aperf(int index, unsigned long max){
 	u_int64_t aperf0, mperf0, aperf1, mperf1;
-	char *path1 = "/dev/cpu/";
-	char *path2 = "/msr\0";
-	int n = strlen(path1)+strlen(path2)+1;
-	char *path=malloc(n);
-	snprintf(path, n, "%s%d%s", path1,index,path2);
+	char *path = gen_msr_path(index);
+	//printf("PATH=%s\n", path);
 	int fd = open(path, O_RDONLY);
 	if (fd < 0) {
 		//perror("Failed to open MSR");
-		printf("Failed to open MSR %s\n", path);
+		printf("MSR Error %s\n", path);
 		return 0;
 	}
 	
@@ -78,29 +94,35 @@ unsigned long cpu_api(int index){
         //printf("CPU %d Frequency  %lu \n",index, curr/MHZ );
 }
 int main(int argc, char* argv[]){
-	int isMSR=0;
+	int MSR=0;
 	int opt;
 
-        while ((opt = getopt(argc, argv, "mk")) != -1) {
+        while ((opt = getopt(argc, argv, "abk")) != -1) {
             switch (opt) {
-            case 'k': isMSR = 0; break;
-            case 'm': isMSR = 1; break;
+            case 'k': MSR = 0; break;
+            case 'a': MSR = 1; break;
+            case 'b': MSR = 2; break;
             default:
-                fprintf(stderr, "Usage: %s [-m/-k] \n", argv[0]);
+                fprintf(stderr, "Usage: %s [-a/-b/-k] \n", argv[0]);
+                fprintf(stderr, "      -k : read linux kernel api [default]\n");
+                fprintf(stderr, "      -a : read real clock. msr aperf (0xe8)\n");
+                fprintf(stderr, "      -b : read base clock. msr info (0xce) \n");
                 exit(-1);
             }
         }
 
-	unsigned long min, max, curr_msr, curr_api;
+	unsigned long min, max, curr ;
 	if (cpufreq_get_hardware_limits(0, &min, &max)) {
                 fprintf(stderr, "Could not get max frequency (P0), try load cpufreq driver\n");
         }
-        printf("CPU Frequency [%lu - %lu]GHz\n",min/MHZ, max/MHZ );
+        printf("CPU Frequency [%lu - %lu]GHz MSR=%d\n",min/MHZ, max/MHZ, MSR );
         int nprocs = get_nprocs();
         for (int i=0; i<nprocs; ++i) {
-		if(isMSR) curr_msr = cpu_msr_ce(i); 
-		//if(isMSR) curr_msr = cpu_msr_aperf(i,max); 
-		else      curr_api = cpu_api(i);
-		printf("CPU %d Frequency  %lu \n",i, curr_msr/MHZ );
+		switch(MSR){
+			case 0: curr = cpu_api(i); break;
+			case 1: curr = cpu_msr_aperf(i,max); break;
+			case 2: curr = cpu_msr_ce(i); break;
+		}
+		printf("CPU %d Frequency  %lu \n",i, curr/MHZ );
 	}
 }
