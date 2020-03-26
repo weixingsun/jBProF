@@ -38,6 +38,7 @@ char* gen_msr_path(int index){
         char *path=malloc(n);
         snprintf(path, n, "%s%d%s", path1,index,path2);
 	//printf("N=%d  PATH1=%s  PATH2=%s  NUM=%s\n", n, path1, path2, num);
+	free(num);
 	return path;
 }
 unsigned long cpu_msr_ce(int index){
@@ -60,13 +61,12 @@ unsigned long cpu_msr_ce(int index){
 		perror("While closing 0xCE MSR FD");
 		return -1;
 	}
-	//return freq;
+	free(path);
 	return h*1024*100;
 }
 unsigned long cpu_msr_aperf(int index, unsigned long max){
 	u_int64_t aperf0, mperf0, aperf1, mperf1;
 	char *path = gen_msr_path(index);
-	//printf("PATH=%s\n", path);
 	int fd = open(path, O_RDONLY);
 	if (fd < 0) {
 		//perror("Failed to open MSR");
@@ -87,6 +87,7 @@ unsigned long cpu_msr_aperf(int index, unsigned long max){
 		perror("While closing FD");
 		return 0;
 	}
+	free(path);
 	return max * (aperf1-aperf0) / (mperf1-mperf0);
 }
 unsigned long cpu_api(int index){
@@ -95,13 +96,14 @@ unsigned long cpu_api(int index){
 }
 int main(int argc, char* argv[]){
 	int MSR=0;
+	int BATCH=4;
 	int opt;
 
         while ((opt = getopt(argc, argv, "abk")) != -1) {
             switch (opt) {
-            case 'k': MSR = 0; break;
-            case 'a': MSR = 1; break;
-            case 'b': MSR = 2; break;
+            case 'k': MSR = 0; printf("Read Linux API. "); break;
+            case 'a': MSR = 1; printf("Read MSR 0xe8. ");  break;
+            case 'b': MSR = 2; printf("Read MSR 0xce. ");  break;
             default:
                 fprintf(stderr, "Usage: %s [-a/-b/-k] \n", argv[0]);
                 fprintf(stderr, "      -k : read linux kernel api [default]\n");
@@ -115,7 +117,7 @@ int main(int argc, char* argv[]){
 	if (cpufreq_get_hardware_limits(0, &min, &max)) {
                 fprintf(stderr, "Could not get max frequency (P0), try load cpufreq driver\n");
         }
-        printf("CPU Frequency [%lu - %lu]GHz MSR=%d\n",min/MHZ, max/MHZ, MSR );
+        printf("CPU Frequency [%lu - %lu]MHz \n",min/MHZ, max/MHZ );
         int nprocs = get_nprocs();
         for (int i=0; i<nprocs; ++i) {
 		switch(MSR){
@@ -123,6 +125,7 @@ int main(int argc, char* argv[]){
 			case 1: curr = cpu_msr_aperf(i,max); break;
 			case 2: curr = cpu_msr_ce(i); break;
 		}
-		printf("CPU %d Frequency  %lu \n",i, curr/MHZ );
+		printf("CPU %d : %lu \t",i, curr/MHZ );
+		if ((i+1) % BATCH == 0)	printf("\n");
 	}
 }
