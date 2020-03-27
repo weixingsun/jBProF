@@ -1,3 +1,5 @@
+#define _GNU_SOURCE
+#include <numa.h>
 #include <fcntl.h>
 #include <cpufreq.h>
 #include <stdio.h>
@@ -5,7 +7,6 @@
 #include <string.h>
 #include <sys/types.h>
 #include <sys/stat.h>
-#include <sys/sysinfo.h>
 #include <unistd.h>
 
 static int GHZ = 1024*1024;
@@ -19,6 +20,36 @@ static int MHZ = 1024;
 	AZ("While reading IA32_MPERF",e);
 	//printf("IA32_MPERF (0xE7) is %Ld\n", (unsigned long long)var);
 
+void print_bitmask(const struct bitmask *bm){
+    printf("bitmask.size=%lu\n",bm->size);
+    for(size_t i=0; i<bm->size; ++i){
+	//printf("%d", numa_bitmask_isbitset(bm, i));
+        if(numa_bitmask_isbitset(bm, i)){
+	    printf("%ld,",i);
+	}
+    }
+    printf("\n");
+}
+void print_array(int *arr, int len){
+    printf("[");
+    for(int i = 0; i < len; i++){
+        printf("%d,",arr[i]);
+    }
+    printf("]\n");
+}
+void get_node_cpus(int node, struct bitmask *bm, int *cpus, int len){
+    numa_node_to_cpus(node, bm);
+    //printf("numa node %d ", i);
+    //print_bitmask(bm);
+    int j=0;
+    for(size_t i=0; i<bm->size; i++){
+        if(numa_bitmask_isbitset(bm, i)) {
+            cpus[j]=i;
+            j++;
+        }
+    }
+    //print_array(cpus,len);
+}
 char* itos(int x){
     int length = snprintf( NULL, 0, "%d", x );
     char* str = malloc( length + 1 );
@@ -96,7 +127,7 @@ unsigned long cpu_api(int index){
 }
 int main(int argc, char* argv[]){
 	int MSR=0;
-	int BATCH=4;
+	int BATCH=8;
 	int opt;
 
         while ((opt = getopt(argc, argv, "abk")) != -1) {
@@ -117,15 +148,28 @@ int main(int argc, char* argv[]){
 	if (cpufreq_get_hardware_limits(0, &min, &max)) {
                 fprintf(stderr, "Could not get max frequency (P0), try load cpufreq driver\n");
         }
-        printf("CPU Frequency [%lu - %lu]MHz \n",min/MHZ, max/MHZ );
-        int nprocs = get_nprocs();
-        for (int i=0; i<nprocs; ++i) {
-		switch(MSR){
-			case 0: curr = cpu_api(i); break;
-			case 1: curr = cpu_msr_aperf(i,max); break;
-			case 2: curr = cpu_msr_ce(i); break;
-		}
-		printf("CPU %d : %lu \t",i, curr/MHZ );
-		if ((i+1) % BATCH == 0)	printf("\n");
+        printf("CPU Base Frequency [%lu - %lu]MHz \n",min/MHZ, max/MHZ );
+	int n_cpus = numa_num_task_cpus();
+        int n_numas = numa_max_node();
+	int len = n_cpus / (n_numas+1);
+	//printf("%d / %d = %d   MSR=%d\n", n_cpus, n_numas, len, MSR);
+        struct bitmask *bm = numa_bitmask_alloc(n_cpus);
+	for (int i=0; i<=n_numas; i++) {
+		int cpus[len];
+		memset( cpus, 0, len*sizeof(int) );
+		get_node_cpus(i,bm,cpus,len);
+		//printf(" %g GB\n", numa_node_size(i, 0) / (1024.*1024*1024.));
+		for (int i=0;i<len;i++){
+                    switch(MSR){
+                        case 0: curr = cpu_api(cpus[i]); break;
+                        case 1: curr = cpu_msr_aperf(cpus[i],max); break;
+                        case 2: curr = cpu_msr_ce(cpus[i]); break;
+                    }
+                    printf("[%d] %lu   ",cpus[i], curr/MHZ );
+                    //printf("C%d : ",cpus[i] );
+                    if (i==len-1 || i+1 == len/2) printf("\n");
+                }
 	}
+	printf("\n");
+	numa_bitmask_free(bm);
 }
