@@ -66,14 +66,17 @@ if [ $? = 0 ]; then
     #run_with_agent $AGENT "sample_duration=10;sample_mem=mem.log;mon_field=Main@loop@I"
     #run_with_agent $AGENT "sample_duration=10;sample_mem=mem.log;mon_size=1"
 
-    run_with_agent $AGENT "sample_duration=10;sample_mem=mem.log;mon_field=java.util.HashMap@DEFAULT_INITIAL_CAPACITY@I"
-    echo "rule of thumb: when top functions has HashMap.resize  -> bigger initial_capacity"
+    #run_with_agent $AGENT "sample_duration=1:0;sample_mem=mem.log;mon_field=java.util.HashMap@DEFAULT_INITIAL_CAPACITY@I"
+    #run_with_agent $AGENT "sample_duration=1:0;sample_mem=mem.log;mon_field=java.util.HashMap@DEFAULT_LOAD_FACTOR@F"
+    run_with_agent $AGENT "sample_duration=1:0;sample_mem=mem.log;mon_field=java.util.HashMap@loadFactor@F"
+    #echo "rule : when HashMap.resize  -> + initial_capacity"
+    #echo "rule :      HashMap.getNode -> - loadFactor "
+
     #HashMap.DEFAULT_INITIAL_CAPACITY name#363 length=2, value#364 value=0x00000010 (16) flag=0x0018 (static final), type=I (int)
     #00000010 -> 16
     #00000040 -> 64
     #00000100 -> 256
     #00000400 -> 1024
-    echo "rule of thumb:           .  .  .      HashMap.getNode -> smaller loadFactor "
     #HashMap.DEFAULT_LOAD_FACTOR name#366, length=2, value#92, value=0x3f400000 (0.75), flag=0x0018 (static final), type=F (float)
     #3f400000 -> 0.75
     #3f000000 -> 0.5

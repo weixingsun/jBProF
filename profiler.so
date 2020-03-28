@@ -390,65 +390,74 @@ string getCallerMethodName(jthread thread){
  | J | long    |
  | F | float   |
  | D | double  |
-
  | Ljava.lang/String; | String |
  +-------------+
 */
-int get_static_field_float(JNIEnv* jni, jclass cls, string field_name, string field_type){
-    //jclass cls = jni->FindClass(cls_name.c_str());
-    jfieldID f = jni->GetStaticFieldID(cls, field_name.c_str(), field_type.c_str());
-    //jfloat v = jni->GetStaticFloatField(cls,f);
-    jint v = jni->GetStaticIntField(cls,f);
-    return v;
+float get_float(JNIEnv* jni, jobject o, string field_name){
+    jclass cls = jni->GetObjectClass(o);
+    jfieldID f = jni->GetFieldID(cls, field_name.c_str(), "F");
+    return jni->GetFloatField(cls,f);
 }
-void set_static_field_float(JNIEnv* jni, jclass cls, string field_name, string field_type, int value){
-    //jclass cls = jni->FindClass(cls_name.c_str());
-    jfieldID f = jni->GetStaticFieldID(cls, field_name.c_str(), field_type.c_str());
-    //jint v = env->GetIntField (obj, f);
-    jni->SetStaticIntField(cls,f,value);
-    //cout<<"set_static_field() "<<cls_name<<"."<<field_name<<"("<<field_type<<")="<<value<<endl;
-}
-//float load_factor = get_static_field_float(jni, "java.util.HashMap", "DEFAULT_LOAD_FACTOR", "F" );
-//float load_factor = get_static_field_float(jni, "java.util.HashMap", "loadFactor", "F" );
-jint getIntValue(JNIEnv* env, jclass klass, jobject obj, string field_name, string field_type){
-    jfieldID f = env->GetFieldID(klass, field_name.c_str(), field_type.c_str());
-    jint v = env->GetIntField (obj, f);
-    //printf ("type: %s, field: %s, value: %d\n", field_type.c_str(), field_name.c_str(), v);
-    return v;
+int get_int(JNIEnv* jni, jobject o, string field_name){
+    jclass cls = jni->GetObjectClass(o);
+    jfieldID f = jni->GetFieldID(cls, field_name.c_str(), "I");
+    return jni->GetIntField(cls,f);
 }
 
+int get_static_int(JNIEnv* jni, jclass cls, string field_name){
+    //jclass cls = jni->FindClass(cls_name.c_str());
+    jfieldID f = jni->GetStaticFieldID(cls, field_name.c_str(), "I");
+    return jni->GetStaticIntField(cls,f);
+}
+void set_static_int(JNIEnv* jni, jclass cls, string field_name, int value){
+    //jclass cls = jni->FindClass(cls_name.c_str());
+    jfieldID f = jni->GetStaticFieldID(cls, field_name.c_str(), "I");
+    jni->SetStaticIntField(cls,f,value);
+}
+float get_static_float(JNIEnv* jni, jclass cls, string field_name){
+    //jclass cls = jni->FindClass(cls_name.c_str());
+    jfieldID f = jni->GetStaticFieldID(cls, field_name.c_str(), "F");
+    return jni->GetStaticFloatField(cls,f);
+}
+void set_static_float(JNIEnv* jni, jclass cls, string field_name, float value){
+    //jclass cls = jni->FindClass(cls_name.c_str());
+    jfieldID f = jni->GetStaticFieldID(cls, field_name.c_str(), "F");
+    jni->SetStaticFloatField(cls,f,value);
+}
+void map_inc(map<uint32_t,uint32_t> m, int v){
+                uint32_t key = log2(v);
+                jvmti->RawMonitorEnter(lock);
+                m[key]++;
+                jvmti->RawMonitorExit(lock);
+}
 void JNICALL SampledObjectAlloc(jvmtiEnv* jvmti, JNIEnv* env, jthread thread, jobject object, jclass klass, jlong size) {
     char* class_sig = NULL;
     if (jvmti->GetClassSignature(klass, &class_sig, NULL) ==0 ){
         string class_name = decode_class_signature(string(class_sig));
+
         string method_name = getCallerMethodName(thread);
         string result = method_name+"("+class_name + ")";
         jvmti->RawMonitorEnter(lock);
         MEM_MAP[result]++;
         jvmti->RawMonitorExit(lock);
-        if(MON_JAVA_CLASS.length()>0 && class_name == MON_JAVA_CLASS){
-            if(MON_JAVA_FIELD.length() > 0){
-                //jint v = getIntValue(env,klass,object, MON_JAVA_FIELD,MON_JAVA_FIELD_TYPE);
-		//cout<<"SampleObjectAlloc() "<<MON_JAVA_CLASS<<"."<<MON_JAVA_FIELD<<"="<<v<<endl;
-		
-		int v = get_static_field_float(env,klass,MON_JAVA_FIELD,MON_JAVA_FIELD_TYPE);
-		set_static_field_float(env,klass,MON_JAVA_FIELD,MON_JAVA_FIELD_TYPE,v+1);
-		cout<<"SampleObjectAlloc() "<<MON_JAVA_CLASS<<"."<<MON_JAVA_FIELD<<"="<<v<<endl;
-
-
-                //uint32_t key = log2(v);
-                //jvmti->RawMonitorEnter(lock);
-                //INT_FIELD_MAP[key]++;
-                //jvmti->RawMonitorExit(lock);
-		//
-		//float value = get_static_field_float(jni, MON_JAVA_CLASS, MON_JAVA_FIELD, MON_JAVA_FIELD_TYPE );
-                //cout<<"v ="<<value<<endl;
-            }else{
-                uint32_t key = log2(size);
-                jvmti->RawMonitorEnter(lock);
-                INT_FIELD_MAP[key]++;
-                jvmti->RawMonitorExit(lock);
-            }
+        if(MON_JAVA_CLASS.length()>0 && class_name == MON_JAVA_CLASS ) { //class match
+	    if (MON_JAVA_FIELD.length() > 0){
+		if (MON_JAVA_FIELD_TYPE == "I"){
+                    //int v = get_static_int(env,klass,MON_JAVA_FIELD);
+		    //set_static_int(env,klass,MON_JAVA_FIELD,2*v);
+                    int v = get_float(env,object,MON_JAVA_FIELD);
+                    cout<<"SampleObjectAlloc() "<<MON_JAVA_CLASS<<"."<<MON_JAVA_FIELD<<"="<<v<<endl;
+                    map_inc(INT_FIELD_MAP, v);
+		}else if (MON_JAVA_FIELD_TYPE == "F"){
+                    //float load_factor = get_static_field_float(jni, "java.util.HashMap", "DEFAULT_LOAD_FACTOR", "F" );
+                    //float load_factor = get_static_field_float(jni, "java.util.HashMap", "loadFactor", "F" );
+		    float v = get_float(jni, klass, MON_JAVA_FIELD);
+		    cout<<"SampleObjectAlloc() "<<MON_JAVA_CLASS<<"."<<MON_JAVA_FIELD<<"="<<v<<endl;
+		}
+	    }
+	    //if (tuning >0) {
+                
+	    //}
         }else if(MON_SIZE > 0){
             uint32_t key = log2(size);
             SIZE_MAP[key]++;
@@ -466,15 +475,17 @@ void PrintMemoryMap(int signum){
     //cout<<"sampled alloc objects: map.size="<<MEM_MAP.size()<<endl;
     if(out_mem != NULL){
         tm* now = get_time();
-        fprintf(out_mem, "%d:%d:%d\t Count \t Method(Class) \n", now->tm_hour, now->tm_min, now->tm_sec);
-        for(auto elem : MEM_MAP){
-            //cout << "\t" <<elem.second << "\t" << elem.first << endl;
-            fprintf(out_mem, "\t %d \t %s \n", elem.second, elem.first.c_str() );
-        }
-        MEM_MAP.clear();
-        if(MON_JAVA_CLASS.length()>0){
+        //if(MON_JAVA_CLASS.length()>0){
+            fprintf(out_mem, "%d:%d:%d\t Count \t Method(Class) \n", now->tm_hour, now->tm_min, now->tm_sec);
+            for(auto elem : MEM_MAP){
+                //cout << "\t" <<elem.second << "\t" << elem.first << endl;
+                fprintf(out_mem, "\t %d \t %s \n", elem.second, elem.first.c_str() );
+            }
+            MEM_MAP.clear();
+	//}
+        if(MON_JAVA_FIELD.length()>0){
 	    //cout<<"sampled field: map.size="<<INT_FIELD_MAP.size()<<endl;
-            fprintf(out_mem, "\n\t Size \t Count \n" );
+            fprintf(out_mem, "\n\t Size \t Count   %s\n", MON_JAVA_FIELD.c_str() );
             for(auto elem : INT_FIELD_MAP){
                 fprintf(out_mem, "\t >%ld \t %d \n", (long)exp2(elem.first), elem.second );
             }
@@ -482,7 +493,7 @@ void PrintMemoryMap(int signum){
         }
         if(MON_SIZE>0){
 	    //cout<<"sampled size_map: map.size="<<SIZE_MAP.size()<<endl;
-            fprintf(out_mem, "\n\t Size \t Count \n" );
+            fprintf(out_mem, "\n\t Size \t Count   Alloc\n" );
             for(auto elem : SIZE_MAP){
                 fprintf(out_mem, "\t >%ld \t %d \n", (long)exp2(elem.first), elem.second );
             }
@@ -949,7 +960,7 @@ int do_single_options(string k, string v, jvmtiEnv* jvmti){
         MON_JAVA_CLASS = vs[0];
         MON_JAVA_FIELD = vs[1];
         MON_JAVA_FIELD_TYPE = vs[2];
-        cout << "class=" << MON_JAVA_CLASS << "   field=" << MON_JAVA_FIELD <<  "   type=" << MON_JAVA_FIELD_TYPE << endl;
+        //cout << "class=" << MON_JAVA_CLASS << "   field=" << MON_JAVA_FIELD <<  "   type=" << MON_JAVA_FIELD_TYPE << endl;
         return 0;
     }else if(k.compare("flame")==0){
         gen_perf_file();
