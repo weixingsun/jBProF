@@ -1,0 +1,27 @@
+|***************************************|
+perf map: /tmp/perf-2996.map
+sample_duration=10
+sample_mem=mem.log
+tune_field=java.util.HashMap@DEFAULT_INITIAL_CAPACITY@I@1@2,499
+tune_field= java.util.HashMap@DEFAULT_INITIAL_CAPACITY@I@1@2,499
+size = 5
+class=java.util.HashMap   field=DEFAULT_INITIAL_CAPACITY   type=I   algo=1   minmax=2,499
+|***************************************|
+sampling memory alloc...
+Done.
+VMInit() Load Class : java.util.HashMap
+SampleAlloc() tune -> java.util.HashMap.DEFAULT_INITIAL_CAPACITY=16
+SampleAlloc() tune -> java.util.HashMap.DEFAULT_INITIAL_CAPACITY=32
+SampleAlloc() tune -> java.util.HashMap.DEFAULT_INITIAL_CAPACITY=64
+SampleAlloc() tune -> java.util.HashMap.DEFAULT_INITIAL_CAPACITY=128
+SampleAlloc() tune -> java.util.HashMap.DEFAULT_INITIAL_CAPACITY=256
+SampleAlloc() tune -> java.util.HashMap.DEFAULT_INITIAL_CAPACITY=512
+SampleAlloc() tune -> java.util.HashMap.DEFAULT_INITIAL_CAPACITY=499
+SampleAlloc() tune -> java.util.HashMap.DEFAULT_INITIAL_CAPACITY=499
+SampleAlloc() tune -> java.util.HashMap.DEFAULT_INITIAL_CAPACITY=499
+Final result= 1115752192
+Agent Unload.
+
+real	0m8.520s
+user	0m8.347s
+sys	0m0.109s
