@@ -5,8 +5,8 @@ if [ ! -f $SRC ]; then
 fi
 rm -rf $AGENT log thread.log cpu.log mem.log hs_err* jcmd.log /tmp/perf*  #flame.svg
 kill -9 `ps -ef|grep java|grep -v grep |awk '{print $2}'`
-LOOP="1000 100000"
-JIT="-Xmx400m -Xms100m -XX:+UseParallelOldGC -XX:ParallelGCThreads=1 -XX:+PreserveFramePointer" # -XX:+DTraceMethodProbes" #-XX:+ExtendedDTraceProbes
+LOOP="1000 200000"
+JIT="-Xmx400m -Xms10m -XX:+UseParallelOldGC -XX:ParallelGCThreads=1 -XX:+PreserveFramePointer" # -XX:+DTraceMethodProbes" #-XX:+ExtendedDTraceProbes
 
 JAVA_HOME=/home/sun/jbb/jdk13
 java_build(){
@@ -66,9 +66,11 @@ if [ $? = 0 ]; then
     #run_with_agent $AGENT "sample_duration=10;sample_mem=mem.log;mon_field=Main@loop@I"
     #run_with_agent $AGENT "sample_duration=10;sample_mem=mem.log;mon_size=1"
 
-    #run_with_agent $AGENT "sample_duration=1:0;sample_mem=mem.log;mon_field=java.util.HashMap@DEFAULT_INITIAL_CAPACITY@I"
-    #run_with_agent $AGENT "sample_duration=1:0;sample_mem=mem.log;mon_field=java.util.HashMap@DEFAULT_LOAD_FACTOR@F"
-    run_with_agent $AGENT "sample_duration=1:0;sample_mem=mem.log;mon_field=java.util.HashMap@loadFactor@F"
+    #run_with_agent $AGENT "sample_duration=10;sample_mem=mem.log;mon_field=java.util.HashMap@loadFactor@F"
+    #run_with_agent $AGENT "sample_duration=10;sample_mem=mem.log;mon_field=java.util.HashMap@DEFAULT_LOAD_FACTOR@F"
+
+    run_with_agent $AGENT "sample_duration=10;sample_mem=mem.log;tune_field=java.util.HashMap@DEFAULT_INITIAL_CAPACITY@I@1@2,499"  #1:*2
+    #run_with_agent $AGENT "sample_duration=10;sample_mem=mem.log;tune_field=java.util.HashMap@DEFAULT_LOAD_FACTOR@F@2@0.2,0.8"  #2:-0.5 (0.2, 0.8)
     #echo "rule : when HashMap.resize  -> + initial_capacity"
     #echo "rule :      HashMap.getNode -> - loadFactor "
 
