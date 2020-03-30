@@ -7,8 +7,10 @@
 #include <stack>
 #include <iostream>
 #include <sstream>
+#include <signal.h>
 #include <stdarg.h>
 #include <stdio.h>
+#include <sys/time.h>
 #include <unistd.h>
 #include <bcc/BPF.h>
 #include <jvmti.h>
@@ -21,10 +23,8 @@ using namespace std;
 static bool writing_perf = false;
 static FILE* out_cpu;
 static FILE* out_thread;
-//static FILE* out_mem;
+static FILE* out_mem;
 static FILE* out_perf;
-static jlong start_time;
-static jrawMonitorID vmtrace_lock;
 static jvmtiEnv* jvmti = NULL;
 static jrawMonitorID tree_lock;
 
@@ -38,6 +38,7 @@ static int BP_SEQ = 1;
 static ebpf::BPF bpf;
 static map<int,string> BPF_TXT_MAP;
 static map<int,string> BPF_FN_MAP;
+static map<string,int> MEM_MAP;
 
 struct Frame {
     jlong samples;
@@ -293,9 +294,7 @@ static jlong get_time(jvmtiEnv* jvmti) {
     jvmti->GetTime(&current_time);
     return current_time;
 }
-
-// Converts JVM internal class signature to human readable name
-static string decode_class_signature(char* class_sig) {
+static string decode_class_char(char* class_sig) {
     //Lorg/net/XX  [I
     switch (class_sig[1]) {
         case 'B': return "byte";
@@ -314,7 +313,26 @@ static string decode_class_signature(char* class_sig) {
     for (char* c = class_sig; *c; c++) {
         if (*c == '/') *c = '.';
     }
-
+    return class_sig;
+}
+static string decode_class_signature(string class_sig) {
+    //Lorg/net/XX  [O
+    switch (class_sig[1]) {
+        case 'B': return "byte";
+        case 'C': return "char";
+        case 'D': return "double";
+        case 'F': return "float";
+        case 'I': return "int";
+        case 'J': return "long";
+        case 'S': return "short";
+        case 'Z': return "boolean";
+    }
+    // rm first 'L' and last ';'
+    class_sig.erase(0, 1);
+    class_sig.pop_back();
+    //class_sig.substr(1,class_sig.size()-2);
+    // Replace '/' with '.'
+    replace( class_sig.begin(), class_sig.end(), '/', '.' );
     return class_sig;
 }
 void jvmti_free(char* ptr){
@@ -324,14 +342,14 @@ static string get_method_name(jmethodID method) {
     jclass method_class;
     char* class_sig = NULL;
     char* method_name = NULL;
-    string result;
     if (jvmti->GetMethodDeclaringClass(method, &method_class) == 0 &&
         jvmti->GetClassSignature(method_class, &class_sig, NULL) == 0 &&
         jvmti->GetMethodName(method, &method_name, NULL, NULL) == 0) {
-        result.assign(decode_class_signature(class_sig) + "." + method_name);
+        string result = decode_class_signature(string(class_sig)) + "." + method_name;
         jvmti_free(method_name);
         jvmti_free(class_sig);
-	return result;
+        return result;
+        //return decode_class_signature(string(class_sig)) + "." + method_name;
     } else {
         return "(NONAME)";
     }
@@ -361,6 +379,17 @@ static void record_stack_trace(char* class_sig, jvmtiFrameInfo* frames, jint cou
     f->bytes += size;
 }
 
+string getCallerMethodName(jthread thread){
+    int DEPTH = 1;
+    jvmtiFrameInfo frames[DEPTH];
+    jint count;
+    if( jvmti->GetStackTrace(thread, 0, DEPTH, frames, &count) ==0 ){
+        jmethodID method = frames[0].method;
+	return get_method_name(method);
+    }else{
+        return "(NONAME)";
+    }
+}
 void JNICALL SampledObjectAlloc(jvmtiEnv* jvmti, JNIEnv* env, jthread thread,
                                 jobject object, jclass object_klass, jlong size) {
     jvmtiFrameInfo frames[MAX_STACK_DEPTH];
@@ -455,7 +484,7 @@ void StartBPF(int id) {
     const string PID = "(tgid=="+to_string(pid)+")";
     string BPF_TXT = getbpftext(id);
     str_replace(BPF_TXT, "PID", PID);
-    cout << "BPF:" << endl << BPF_TXT << endl;
+    //cout << "BPF:" << endl << BPF_TXT << endl;
     auto init_r = bpf.init(BPF_TXT);
     if (init_r.code() != 0) {
         cerr << init_r.msg() << endl;
@@ -572,6 +601,7 @@ void LatencyMethod(method_type method){
     for (auto it=dist.begin(); it!=dist.end();it++) {
         fprintf(out_cpu, ">%ld     \t %ld\t \n", (long)exp2(it->first), it->second );
     }
+    dist.clear();
 }
 
 void PrintTopMethods(int n){
@@ -773,7 +803,7 @@ int do_single_options(string k, string v, jvmtiEnv* jvmti){
     return -1;
 }
 void InitFile() {
-    //out_mem = stderr;
+    out_mem = stderr;
     out_cpu = stdout;
     out_thread = stdout;
     string pid = to_string(getpid());
