@@ -11,9 +11,9 @@
 
 static int GHZ = 1024*1024;
 static int MHZ = 1024;
-#define AZ(m, e) if ((e) < 0) {    \
+#define AZ(m, e) if ((e) < 0) {  \
 	perror(m);               \
-	return 1;                  \
+	return 1;                \
 }
 #define rdmsr(id, var) \
 	e = pread(fd, (void *)&var, 0x08, id); \
@@ -165,7 +165,7 @@ int main(int argc, char* argv[]){
                         case 1: curr = cpu_msr_aperf(cpus[i],max); break;
                         case 2: curr = cpu_msr_ce(cpus[i]); break;
                     }
-                    printf("[%d] %lu   ",cpus[i], curr/MHZ );
+                    printf("[%4d] %lu   ",cpus[i], curr/MHZ );
                     //printf("C%d : ",cpus[i] );
                     if (i==len-1 || i+1 == len/2) printf("\n");
                 }
