@@ -25,6 +25,7 @@ static FILE* out_cpu;
 static FILE* out_thread;
 static FILE* out_mem;
 static FILE* out_perf;
+static JNIEnv* jni = NULL;
 static jvmtiEnv* jvmti = NULL;
 static jrawMonitorID tree_lock;
 
@@ -39,13 +40,7 @@ static ebpf::BPF bpf;
 static map<int,string> BPF_TXT_MAP;
 static map<int,string> BPF_FN_MAP;
 static map<string,int> MEM_MAP;
-
-struct Frame {
-    jlong samples;
-    jlong bytes;
-    map<jmethodID, Frame> children;
-};
-static map<string, Frame> root;
+static vector<string> TUNE_CLASS;
 
 struct method_type {
     uint64_t    addr;
@@ -274,19 +269,21 @@ int do_perf_event_method(struct bpf_perf_event_data *ctx) {
     return 0;
 }
 )";
-void genbpftextmap(){
+void gen_bpf_map(){
     BPF_TXT_MAP[0]=BPF_TXT_FLM;
-    BPF_TXT_MAP[1]=BPF_TXT_MTD;
-    BPF_TXT_MAP[2]=BPF_TXT_TRD;
+    BPF_TXT_MAP[1]=BPF_TXT_TRD;
+    BPF_TXT_MAP[2]=BPF_TXT_MTD;
     BPF_FN_MAP[0]="do_perf_event_flame";
-    BPF_FN_MAP[1]="do_perf_event_method";
-    BPF_FN_MAP[2]="do_perf_event_thread";
+    BPF_FN_MAP[1]="do_perf_event_thread";
+    BPF_FN_MAP[2]="do_perf_event_method";
 }
-string get_prof_func(int id){
-    return BPF_FN_MAP[id];
+string get_prof_func(unsigned long id){
+    int index = log2(id);
+    return BPF_FN_MAP[index];
 }
-string getbpftext(int id){
-    return BPF_TXT_MAP[id];
+string get_bpf_text(unsigned long id){
+    int index = log2(id);
+    return BPF_TXT_MAP[index];
 }
 
 static jlong get_time(jvmtiEnv* jvmti) {
@@ -316,7 +313,6 @@ static string decode_class_char(char* class_sig) {
     return class_sig;
 }
 static string decode_class_signature(string class_sig) {
-    //Lorg/net/XX  [O
     switch (class_sig[1]) {
         case 'B': return "byte";
         case 'C': return "char";
@@ -355,30 +351,6 @@ static string get_method_name(jmethodID method) {
     }
 }
 
-static void write_line(const string stack_line, const string& class_name, const Frame* f) {
-    if (f->samples > 0) {
-        //fprintf(out_mem, "%s %s_[%ld] \n", stack_line.c_str(), class_name.c_str(), f->samples);
-    }
-    for (auto it = f->children.begin(); it != f->children.end(); ++it) {
-        write_line(stack_line + get_method_name(it->first) + ";", class_name, &it->second);
-    }
-}
-
-static void write_loop_root() {
-    for (auto it = root.begin(); it != root.end(); ++it) {
-        write_line("", it->first, &it->second);
-    }
-}
-
-static void record_stack_trace(char* class_sig, jvmtiFrameInfo* frames, jint count, jlong size) {
-    Frame* f = &root[decode_class_signature(class_sig)];
-    while (--count >= 0) {
-        f = &f->children[frames[count].method];
-    }
-    f->samples++;
-    f->bytes += size;
-}
-
 string getCallerMethodName(jthread thread){
     int DEPTH = 1;
     jvmtiFrameInfo frames[DEPTH];
@@ -390,41 +362,127 @@ string getCallerMethodName(jthread thread){
         return "(NONAME)";
     }
 }
-void JNICALL SampledObjectAlloc(jvmtiEnv* jvmti, JNIEnv* env, jthread thread,
-                                jobject object, jclass object_klass, jlong size) {
-    jvmtiFrameInfo frames[MAX_STACK_DEPTH];
-    jint count;
-    if (jvmti->GetStackTrace(thread, 0, MAX_STACK_DEPTH, frames, &count) != 0) {
-        return;
-    }
-
-    char* class_sig;
-    if (jvmti->GetClassSignature(object_klass, &class_sig, NULL) != 0) {
-        return;
-    }
-    jvmti->RawMonitorEnter(tree_lock);
-    record_stack_trace(class_sig, frames, count, size);
-    jvmti->RawMonitorExit(tree_lock);
-
-    jvmti_free(class_sig);
+/*
+ +---+---------+
+ | Z | boolean |
+ | B | byte    |
+ | C | char    |
+ | S | short   |
+ | I | int     |
+ | J | long    |
+ | F | float   |
+ | D | double  |
+ | Ljava.lang/String; | String |
+ +-------------+
+*/
+float get_float(JNIEnv* jni, jobject o, string field_name){
+    jclass cls = jni->GetObjectClass(o);
+    jfieldID f = jni->GetFieldID(cls, field_name.c_str(), "F");
+    return jni->GetFloatField(cls,f);
+}
+int get_int(JNIEnv* jni, jobject o, string field_name){
+    jclass cls = jni->GetObjectClass(o);
+    jfieldID f = jni->GetFieldID(cls, field_name.c_str(), "I");
+    return jni->GetIntField(cls,f);
 }
 
-void JNICALL DataDumpRequest(jvmtiEnv* jvmti) {
-    jvmti->RawMonitorEnter(tree_lock);
-    write_loop_root();
-    jvmti->RawMonitorExit(tree_lock);
+int get_static_int(JNIEnv* jni, string cls_name, string field_name){
+    jclass cls = jni->FindClass(cls_name.c_str());
+    jfieldID f = jni->GetStaticFieldID(cls, field_name.c_str(), "I");
+    return jni->GetStaticIntField(cls,f);
+}
+void set_static_int(JNIEnv* jni, string cls_name, string field_name, int value){
+    jclass cls = jni->FindClass(cls_name.c_str());
+    jfieldID f = jni->GetStaticFieldID(cls, field_name.c_str(), "I");
+    jni->SetStaticIntField(cls,f,value);
+}
+float get_static_float(JNIEnv* jni, string cls_name, string field_name){
+    jclass cls = jni->FindClass(cls_name.c_str());
+    jfieldID f = jni->GetStaticFieldID(cls, field_name.c_str(), "F");
+    return jni->GetStaticFloatField(cls,f);
+}
+void set_static_float(JNIEnv* jni, string cls_name, string field_name, float value){
+    jclass cls = jni->FindClass(cls_name.c_str());
+    jfieldID f = jni->GetStaticFieldID(cls, field_name.c_str(), "F");
+    jni->SetStaticFloatField(cls,f,value);
+}
+string replace_string(string text, char t, char s){
+    replace(text.begin(), text.end(), t, s);
+    return text;
+}
+vector<string> str_2_vec(string str, char sep){
+    istringstream ss(str);
+    vector<string> kv;
+    string sub;
+    while (getline(ss,sub,sep)){
+        kv.push_back(sub);
+    }
+    return kv;
+}
+float tune_float(float v, int algo, string MIN_MAX){
+    vector<string> vs= str_2_vec(MIN_MAX,',');
+    float MIN = stof(vs[0]);
+    float MAX = stof(vs[1]);
+    switch(algo){
+        case 1: return (v<MAX?v*2:MAX);
+	case 2: return (v>MIN?v-0.05f:MIN);
+    }
+    return 0;
+}
+int tune_int(int v, int algo, string MIN_MAX){
+    vector<string> vs= str_2_vec(MIN_MAX,',');
+    float MIN = stoi(vs[0]);
+    float MAX = stoi(vs[1]);
+    switch(algo){
+        case 1: return (v<MAX?v*2:MAX);
+	case 2: return (v>MIN?v-1:MIN);
+    }
+    return 0;
+}
+void tune(JNIEnv* env, string cls_name, string field_name, string field_type){
+    if(field_type=="I"){
+        int v = get_static_int(env,cls_name,field_name);
+	//set_static_int(env,cls_name,field_name, tune_int(v,TUNE_ALGO,TUNE_MIN_MAX));
+    }else if(field_type=="F"){
+        float v = get_static_float(env,cls_name,field_name);
+	//set_static_float(env,cls_name,field_name,tune_float(v,TUNE_ALGO,TUNE_MIN_MAX));
+    }
+}
+void SetupTimer(int duration, int interval, __sighandler_t timer_handler){
+    struct sigaction sa;
+    itimerval timer;
+    /* Install timer_handler as the signal handler for SIGVTALRM. */
+    memset (&sa, 0, sizeof (sa));
+    sa.sa_handler = timer_handler;
+    sigaction (SIGVTALRM, &sa, NULL);
+
+    //start after 1 second
+    timer.it_value.tv_sec = 1;
+    timer.it_value.tv_usec = 0;
+    timer.it_interval.tv_sec = interval;
+    timer.it_interval.tv_usec = 0;
+    setitimer (ITIMER_VIRTUAL, &timer, NULL);
+}
+void JNICALL SampledObjectAlloc(jvmtiEnv* jvmti, JNIEnv* env, jthread thread,
+                                jobject object, jclass object_klass, jlong size) {
 }
 
 void JNICALL VMDeath(jvmtiEnv* jvmti, JNIEnv* env) {
-    DataDumpRequest(jvmti);
 }
 
+void VMInit(jvmtiEnv *jvmti, JNIEnv* env, jthread thread) {
+    jni = env;
+    if(TUNE_CLASS.size()>0){
+	for (auto CLASS : TUNE_CLASS){
+            jclass cls = jni->FindClass(replace_string(CLASS,'.','/').c_str());
+            jvmti->RetransformClasses(1, &cls);
+        }
+    }
+}
 void JNICALL GarbageCollectionStart(jvmtiEnv *jvmti) {
-    DataDumpRequest(jvmti);
 }
 
 void JNICALL GarbageCollectionFinish(jvmtiEnv *jvmti_env) {
-    DataDumpRequest(jvmti);
     //trace(jvmti_env, "GC finished");
 }
 void JNICALL CompiledMethodLoad(jvmtiEnv *jvmti, jmethodID method, jint code_size,
@@ -477,12 +535,11 @@ perf_event_attr AttachBreakPoint(uint64_t addr, const string& fn, int seq){
     return attr;
 }
 
-void StartBPF(int id) {
-    //cout << "StartBPF(" << id << ")" << endl;
-    //ebpf::BPF bpf;
+void StartBPF(unsigned long id) {
+    cout << "StartBPF(" << id << ")" << endl;
     int pid = getpid();
     const string PID = "(tgid=="+to_string(pid)+")";
-    string BPF_TXT = getbpftext(id);
+    string BPF_TXT = get_bpf_text(id);
     str_replace(BPF_TXT, "PID", PID);
     //cout << "BPF:" << endl << BPF_TXT << endl;
     auto init_r = bpf.init(BPF_TXT);
@@ -604,7 +661,7 @@ void LatencyMethod(method_type method){
     dist.clear();
 }
 
-void PrintTopMethods(int n){
+void PrintTopMethods(int N){
     auto table = bpf.get_hash_table<method_key_t, uint64_t>("counts").get_table_offline();
     auto stacks = bpf.get_stack_table("stack_traces");
     cout<<"sampled "<< table.size() << " methods"<<endl;
@@ -632,7 +689,7 @@ void PrintTopMethods(int n){
 	}else{
 	    (*p).second += it.second;    //merge_method from different callers
 	}
-	if( mout.size() >n ) break;
+	if( mout.size() >N ) break;
         fprintf(stdout,   "%ld\t %lx\t %lx\t, %lx\t %s\n", it.second, it.first.bp, it.first.ret, method_addr, method_name.c_str());
         //fprintf(out_cpu, "%ld\t %d\t  %d\t  %lx\t %s\n", it.second, it.first.user_stack_id, it.first.kernel_stack_id, method_addr, method_name.c_str());
     }
@@ -641,10 +698,10 @@ void PrintTopMethods(int n){
     multimap<int, method_type> rmap = flip_map(mout);
     //cout<<"flip method done, printing ("<< rmap.size()<<")"<<endl;
     int i=0;
-    method_type methods[n];
+    method_type methods[N];
     for (multimap<int,method_type>::const_reverse_iterator it = rmap.rbegin(); it!=rmap.rend(); ++it){
         fprintf(out_cpu, "%d\t %lx\t %s\n", it->first, it->second.addr, it->second.name.c_str() );
-	if (i<n) methods[i++]=it->second;
+	if (i<N) methods[i++]=it->second;
     }
     //cout<<"method array done, printing ("<< n<<")"<<endl;
     if(COUNT_TOP_N>0){
@@ -698,17 +755,11 @@ void PrintFlame(){
     fclose(out_cpu);
 }
 
-void PrintBPF(int id){
-    switch(id){
-        case 0:
-            PrintFlame();
-	    break;
-        case 1:
-	    PrintTopMethods(SAMPLE_TOP_N);
-	    break;
-        case 2:
-            PrintThread();
-	    break;
+void PrintBPF(unsigned long id){
+    switch((int)log2(id)){
+        case 0: PrintFlame(); break;
+        case 1: PrintThread(); break;
+        case 2: PrintTopMethods(SAMPLE_TOP_N); break;
     }
 }
 vector<string> parse_options(string str, char sep){
@@ -747,6 +798,7 @@ void registerCall(jvmtiEnv* jvmti){
     jvmtiEventCallbacks call = {0};
     //call.SampledObjectAlloc = SampledObjectAlloc;
     //call.DataDumpRequest = DataDumpRequest;
+    call.VMInit = VMInit;
     //call.VMDeath = VMDeath;
     //call.GarbageCollectionStart = GarbageCollectionStart;
     //call.GarbageCollectionFinish = GarbageCollectionFinish;
@@ -754,6 +806,12 @@ void registerCall(jvmtiEnv* jvmti){
     call.CompiledMethodUnload = CompiledMethodUnload;
     call.DynamicCodeGenerated = DynamicCodeGenerated;
     jvmti->SetEventCallbacks(&call, sizeof(call));
+}
+void disableAllEvents(){
+	jvmti->SetEventNotificationMode(JVMTI_DISABLE, JVMTI_EVENT_VM_INIT, NULL);
+	jvmti->SetEventNotificationMode(JVMTI_DISABLE, JVMTI_EVENT_COMPILED_METHOD_LOAD, NULL);
+	jvmti->SetEventNotificationMode(JVMTI_DISABLE, JVMTI_EVENT_DYNAMIC_CODE_GENERATED, NULL);
+	jvmti->SetEventNotificationMode(JVMTI_DISABLE, JVMTI_EVENT_SAMPLED_OBJECT_ALLOC, NULL);
 }
 void enableEvent(jvmtiEnv* jvmti){
     //jvmti->SetEventNotificationMode(JVMTI_ENABLE, JVMTI_EVENT_SAMPLED_OBJECT_ALLOC, NULL);
@@ -783,21 +841,21 @@ int do_single_options(string k, string v, jvmtiEnv* jvmti){
         BPF_PERF_FREQ=stoi(v);
     }else if(k.compare("sample_top")==0){
         SAMPLE_TOP_N=stoi(v);
-    }else if(k.compare("count_top")==0){
-        COUNT_TOP_N=stoi(v);
-    }else if(k.compare("lat_top")==0){
-        LAT_TOP_N=stoi(v);
-    }else if(k.compare("flame")==0){
-        gen_perf_file();
-        out_cpu = fopen(v.c_str(), "w");
-        return 0;
-    }else if(k.compare("sample_method")==0){
+    }else if(k.compare("flame")==0){         // 0000 0001
         gen_perf_file();
         out_cpu = fopen(v.c_str(), "w");
         return 1;
-    }else if(k.compare("sample_thread")==0){
+    }else if(k.compare("sample_thread")==0){ // 0000 0010
         out_thread = fopen(v.c_str(), "w");
         return 2;
+    }else if(k.compare("sample_method")==0){ // 0000 0100
+        gen_perf_file();
+        out_cpu = fopen(v.c_str(), "w");
+        return 4;
+    }else if(k.compare("lat_top")==0){
+        LAT_TOP_N=stoi(v);
+    }else if(k.compare("count_top")==0){
+        COUNT_TOP_N=stoi(v);
     }
     //jvmti->SetHeapSamplingInterval(1024*1024); //1m
     return -1;
@@ -814,7 +872,7 @@ void InitFile() {
 JNIEXPORT jint JNICALL Agent_OnLoad(JavaVM* vm, char* options, void* reserved) {
     cout << "|***************************************|"<< endl;
     InitFile();
-    genbpftextmap();
+    gen_bpf_map();
     vm->GetEnv((void**) &jvmti, JVMTI_VERSION_1_0);
     jvmti->CreateRawMonitor("tree_lock", &tree_lock);
     int id = -1;
@@ -832,11 +890,14 @@ JNIEXPORT jint JNICALL Agent_OnLoad(JavaVM* vm, char* options, void* reserved) {
     StartBPF(id);
     StopBPF();
     PrintBPF(id);
-    //fclose(out_mem);
     cout << "Done."<< endl;
     return 0;
 }
-
+JNIEXPORT void JNICALL Agent_OnUnload(JavaVM *vm){
+    cout<<"Agent Unload."<<endl;
+    disableAllEvents();
+    //closeAllFiles();
+}
 JNIEXPORT jint JNICALL Agent_OnAttach(JavaVM* vm, char* options, void* reserved) {
     if (jvmti != NULL) {
         return 0;
