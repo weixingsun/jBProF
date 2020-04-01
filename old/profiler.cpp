@@ -19,7 +19,6 @@
 
 using namespace std;
 
-#define MAX_STACK_DEPTH 128
 static bool writing_perf = false;
 static FILE* out_cpu;
 static FILE* out_thread;
@@ -386,7 +385,12 @@ int get_int(JNIEnv* jni, jobject o, string field_name){
     return jni->GetIntField(cls,f);
 }
 
+string replace_string(string text, char t, char s){
+    replace(text.begin(), text.end(), t, s);
+    return text;
+}
 int get_static_int(JNIEnv* jni, string cls_name, string field_name){
+    //string cn = replace_string(cls_name,'.','/');
     jclass cls = jni->FindClass(cls_name.c_str());
     jfieldID f = jni->GetStaticFieldID(cls, field_name.c_str(), "I");
     return jni->GetStaticIntField(cls,f);
@@ -402,13 +406,9 @@ float get_static_float(JNIEnv* jni, string cls_name, string field_name){
     return jni->GetStaticFloatField(cls,f);
 }
 void set_static_float(JNIEnv* jni, string cls_name, string field_name, float value){
-    jclass cls = jni->FindClass(cls_name.c_str());
+    jclass cls = jni->FindClass(replace_string(cls_name,'.','/').c_str());
     jfieldID f = jni->GetStaticFieldID(cls, field_name.c_str(), "F");
     jni->SetStaticFloatField(cls,f,value);
-}
-string replace_string(string text, char t, char s){
-    replace(text.begin(), text.end(), t, s);
-    return text;
 }
 vector<string> str_2_vec(string str, char sep){
     istringstream ss(str);
@@ -442,9 +442,11 @@ int tune_int(int v, int algo, string MIN_MAX){
 void tune(JNIEnv* env, string cls_name, string field_name, string field_type){
     if(field_type=="I"){
         int v = get_static_int(env,cls_name,field_name);
+        cout<<cls_name<<"."<<field_name<<"="<<v<<endl;
 	//set_static_int(env,cls_name,field_name, tune_int(v,TUNE_ALGO,TUNE_MIN_MAX));
     }else if(field_type=="F"){
         float v = get_static_float(env,cls_name,field_name);
+        cout<<cls_name<<"."<<field_name<<"="<<v<<endl;
 	//set_static_float(env,cls_name,field_name,tune_float(v,TUNE_ALGO,TUNE_MIN_MAX));
     }
 }
@@ -465,19 +467,18 @@ void SetupTimer(int duration, int interval, __sighandler_t timer_handler){
 }
 void JNICALL SampledObjectAlloc(jvmtiEnv* jvmti, JNIEnv* env, jthread thread,
                                 jobject object, jclass object_klass, jlong size) {
+    //Save JNI per thread
+    if (jni == NULL) jni = env;
+    //tune(env, "java.util.HashMap", "DEFAULT_LOAD_FACTOR", "F");
+    //tune(env, "java.util.HashMap", "DEFAULT_INITIAL_CAPACITY", "I");
 }
 
 void JNICALL VMDeath(jvmtiEnv* jvmti, JNIEnv* env) {
 }
 
 void VMInit(jvmtiEnv *jvmti, JNIEnv* env, jthread thread) {
-    jni = env;
-    if(TUNE_CLASS.size()>0){
-	for (auto CLASS : TUNE_CLASS){
-            jclass cls = jni->FindClass(replace_string(CLASS,'.','/').c_str());
-            jvmti->RetransformClasses(1, &cls);
-        }
-    }
+    //jclass cls = jni->FindClass("java/util/HashMap");
+    //jvmti->RetransformClasses(1, &cls);
 }
 void JNICALL GarbageCollectionStart(jvmtiEnv *jvmti) {
 }
@@ -788,7 +789,7 @@ void registerCapa(jvmtiEnv* jvmti){
     capa.can_tag_objects = 1;
     capa.can_generate_all_class_hook_events = 1;
     capa.can_generate_compiled_method_load_events = 1;
-    //capa.can_generate_sampled_object_alloc_events = 1;
+    capa.can_generate_sampled_object_alloc_events = 1;
     //capa.can_generate_garbage_collection_events = 1;
     //capa.can_generate_object_free_events = 1;
     //capa.can_generate_vm_object_alloc_events = 1;
@@ -796,33 +797,32 @@ void registerCapa(jvmtiEnv* jvmti){
 }
 void registerCall(jvmtiEnv* jvmti){
     jvmtiEventCallbacks call = {0};
-    //call.SampledObjectAlloc = SampledObjectAlloc;
-    //call.DataDumpRequest = DataDumpRequest;
-    call.VMInit = VMInit;
-    //call.VMDeath = VMDeath;
     //call.GarbageCollectionStart = GarbageCollectionStart;
     //call.GarbageCollectionFinish = GarbageCollectionFinish;
+    //call.VMInit = VMInit;
+    call.SampledObjectAlloc = SampledObjectAlloc;
     call.CompiledMethodLoad = CompiledMethodLoad;
     call.CompiledMethodUnload = CompiledMethodUnload;
     call.DynamicCodeGenerated = DynamicCodeGenerated;
     jvmti->SetEventCallbacks(&call, sizeof(call));
 }
 void disableAllEvents(){
-	jvmti->SetEventNotificationMode(JVMTI_DISABLE, JVMTI_EVENT_VM_INIT, NULL);
-	jvmti->SetEventNotificationMode(JVMTI_DISABLE, JVMTI_EVENT_COMPILED_METHOD_LOAD, NULL);
-	jvmti->SetEventNotificationMode(JVMTI_DISABLE, JVMTI_EVENT_DYNAMIC_CODE_GENERATED, NULL);
-	jvmti->SetEventNotificationMode(JVMTI_DISABLE, JVMTI_EVENT_SAMPLED_OBJECT_ALLOC, NULL);
+    //jvmti->SetEventNotificationMode(JVMTI_DISABLE, JVMTI_EVENT_GARBAGE_COLLECTION_START, NULL);
+    //jvmti->SetEventNotificationMode(JVMTI_DISABLE, JVMTI_EVENT_GARBAGE_COLLECTION_FINISH, NULL);
+    //jvmti->SetEventNotificationMode(JVMTI_DISABLE, JVMTI_EVENT_VM_INIT, NULL);
+    jvmti->SetEventNotificationMode(JVMTI_DISABLE, JVMTI_EVENT_COMPILED_METHOD_LOAD, NULL);
+    jvmti->SetEventNotificationMode(JVMTI_DISABLE, JVMTI_EVENT_COMPILED_METHOD_UNLOAD, NULL);
+    jvmti->SetEventNotificationMode(JVMTI_DISABLE, JVMTI_EVENT_DYNAMIC_CODE_GENERATED, NULL);
+    jvmti->SetEventNotificationMode(JVMTI_DISABLE, JVMTI_EVENT_SAMPLED_OBJECT_ALLOC, NULL);
 }
 void enableEvent(jvmtiEnv* jvmti){
-    //jvmti->SetEventNotificationMode(JVMTI_ENABLE, JVMTI_EVENT_SAMPLED_OBJECT_ALLOC, NULL);
-    //jvmti->SetEventNotificationMode(JVMTI_ENABLE, JVMTI_EVENT_DATA_DUMP_REQUEST, NULL);
-    //jvmti->SetEventNotificationMode(JVMTI_ENABLE, JVMTI_EVENT_VM_DEATH, NULL);
     //jvmti->SetEventNotificationMode(JVMTI_ENABLE, JVMTI_EVENT_GARBAGE_COLLECTION_START, NULL);
     //jvmti->SetEventNotificationMode(JVMTI_ENABLE, JVMTI_EVENT_GARBAGE_COLLECTION_FINISH, NULL);
-
+    //jvmti->SetEventNotificationMode(JVMTI_ENABLE, JVMTI_EVENT_VM_INIT, NULL);
     jvmti->SetEventNotificationMode(JVMTI_ENABLE, JVMTI_EVENT_COMPILED_METHOD_LOAD, NULL);
     jvmti->SetEventNotificationMode(JVMTI_ENABLE, JVMTI_EVENT_COMPILED_METHOD_UNLOAD, NULL);
     jvmti->SetEventNotificationMode(JVMTI_ENABLE, JVMTI_EVENT_DYNAMIC_CODE_GENERATED, NULL);
+    jvmti->SetEventNotificationMode(JVMTI_ENABLE, JVMTI_EVENT_SAMPLED_OBJECT_ALLOC, NULL);
 
     jvmti->GenerateEvents(JVMTI_EVENT_DYNAMIC_CODE_GENERATED);
     jvmti->GenerateEvents(JVMTI_EVENT_COMPILED_METHOD_LOAD);
@@ -832,7 +832,7 @@ void gen_perf_file(){
     registerCall(jvmti);
     enableEvent(jvmti);
 }
-int do_single_options(string k, string v, jvmtiEnv* jvmti){
+int do_single_options(string k, string v){
     if (k.compare("sample_duration") == 0){
         DURATION=stoi(v);
     }else if(k.compare("monitor_duration")==0){
@@ -856,6 +856,9 @@ int do_single_options(string k, string v, jvmtiEnv* jvmti){
         LAT_TOP_N=stoi(v);
     }else if(k.compare("count_top")==0){
         COUNT_TOP_N=stoi(v);
+    }else if(k.compare("tune_cfg")==0){
+        //java/util/HashMap       DEFAULT_INITIAL_CAPACITY        I       +       2048    *2      java.util.HashMap.resize
+        TUNE_CLASS.push_back(v);
     }
     //jvmti->SetHeapSamplingInterval(1024*1024); //1m
     return -1;
@@ -882,7 +885,7 @@ JNIEXPORT jint JNICALL Agent_OnLoad(JavaVM* vm, char* options, void* reserved) {
             string k = get_key(kv, "=");
             string v = get_value(kv, "=");
             cout << k << "=" << v << endl;
-            int i = do_single_options(k,v,jvmti);
+            int i = do_single_options(k,v);
             if (i>-1) id=i;
         }
     }
@@ -890,6 +893,11 @@ JNIEXPORT jint JNICALL Agent_OnLoad(JavaVM* vm, char* options, void* reserved) {
     StartBPF(id);
     StopBPF();
     PrintBPF(id);
+    if(TUNE_CLASS.size()>0){
+        for(string cls : TUNE_CLASS){
+            tune(jni, "java/util/HashMap", "DEFAULT_INITIAL_CAPACITY", "I");
+        }
+    }
     cout << "Done."<< endl;
     return 0;
 }
