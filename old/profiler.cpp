@@ -5,6 +5,7 @@
 #include <math.h>
 #include <map>
 #include <stack>
+#include <fstream>
 #include <iostream>
 #include <sstream>
 #include <signal.h>
@@ -419,35 +420,44 @@ vector<string> str_2_vec(string str, char sep){
     }
     return kv;
 }
-float tune_float(float v, int algo, string MIN_MAX){
-    vector<string> vs= str_2_vec(MIN_MAX,',');
-    float MIN = stof(vs[0]);
-    float MAX = stof(vs[1]);
-    switch(algo){
-        case 1: return (v<MAX?v*2:MAX);
-	case 2: return (v>MIN?v-0.05f:MIN);
+
+float tune_float(float v, string algo, string max){
+    float MAX = stof(max);
+    char s = algo[0];
+    algo.erase(0,1);
+    float av = stof(algo);
+    switch(s){
+        case '*': return (v<MAX?v*av:MAX);
+        case '/': return (v>MAX?v/av:MAX);
+        case '+': return (v<MAX?v+av:MAX);
+        case '-': return (v>MAX?v-av:MAX);
     }
     return 0;
 }
-int tune_int(int v, int algo, string MIN_MAX){
-    vector<string> vs= str_2_vec(MIN_MAX,',');
-    float MIN = stoi(vs[0]);
-    float MAX = stoi(vs[1]);
-    switch(algo){
-        case 1: return (v<MAX?v*2:MAX);
-	case 2: return (v>MIN?v-1:MIN);
+int tune_int(int v, string algo, string max){
+    int MAX = stoi(max);
+    char s = algo[0];
+    algo.erase(0,1);
+    int av = stoi(algo);
+    switch(s){
+        case '*': return (v<MAX?v*av:MAX);
+        case '/': return (v>MAX?v/av:MAX);
+        case '+': return (v<MAX?v+av:MAX);
+        case '-': return (v>MAX?v-av:MAX);
     }
     return 0;
 }
-void tune(JNIEnv* env, string cls_name, string field_name, string field_type){
+void tune(JNIEnv* env, string cls_name, string field_name, string field_type, string max, string algo){
     if(field_type=="I"){
         int v = get_static_int(env,cls_name,field_name);
-        cout<<cls_name<<"."<<field_name<<"="<<v<<endl;
-	//set_static_int(env,cls_name,field_name, tune_int(v,TUNE_ALGO,TUNE_MIN_MAX));
+        int v2 = tune_int(v,algo,max);
+        set_static_int(env,cls_name,field_name, v2);
+        cout<<cls_name<<"."<<field_name<<": "<<v<<" -> "<<v2<<endl;
     }else if(field_type=="F"){
         float v = get_static_float(env,cls_name,field_name);
-        cout<<cls_name<<"."<<field_name<<"="<<v<<endl;
-	//set_static_float(env,cls_name,field_name,tune_float(v,TUNE_ALGO,TUNE_MIN_MAX));
+        float v2 = tune_float(v,algo,max);
+        set_static_float(env,cls_name,field_name,v2);
+        cout<<cls_name<<"."<<field_name<<": "<<v<<" -> "<<v2<<endl;
     }
 }
 void SetupTimer(int duration, int interval, __sighandler_t timer_handler){
@@ -469,8 +479,6 @@ void JNICALL SampledObjectAlloc(jvmtiEnv* jvmti, JNIEnv* env, jthread thread,
                                 jobject object, jclass object_klass, jlong size) {
     //Save JNI per thread
     if (jni == NULL) jni = env;
-    //tune(env, "java.util.HashMap", "DEFAULT_LOAD_FACTOR", "F");
-    //tune(env, "java.util.HashMap", "DEFAULT_INITIAL_CAPACITY", "I");
 }
 
 void JNICALL VMDeath(jvmtiEnv* jvmti, JNIEnv* env) {
@@ -567,7 +575,7 @@ void StopBPF(){
     }
     bpf.detach_perf_event(PERF_TYPE_SOFTWARE, PERF_COUNT_HW_CPU_CYCLES);
 }
-void PrintThread(){
+vector<string> PrintThread(){
     auto table = bpf.get_hash_table<thread_key_t, uint64_t>("counts").get_table_offline();
     /*
     sort( table.begin(), table.end(),
@@ -585,8 +593,9 @@ void PrintThread(){
     for (auto it : table) {
 	fprintf(out_thread, "%d\t%d\t%ld\t%0.2f\t%s\n", it.first.pid,it.first.tid,it.second, (float)100*it.second/total_samples, it.first.name );
     }
-
     fclose(out_thread);
+    vector<string> vs;
+    return vs;
 }
 template <typename A, typename B> multimap<B, A> flip_map(map<A,B> & src) {
     multimap<B,A> dst;
@@ -662,7 +671,7 @@ void LatencyMethod(method_type method){
     dist.clear();
 }
 
-void PrintTopMethods(int N){
+vector<string> PrintTopMethods(int N){
     auto table = bpf.get_hash_table<method_key_t, uint64_t>("counts").get_table_offline();
     auto stacks = bpf.get_stack_table("stack_traces");
     cout<<"sampled "<< table.size() << " methods"<<endl;
@@ -684,7 +693,7 @@ void PrintTopMethods(int N){
             method_name = *stacks.get_stack_symbol(it.first.user_stack_id, it.first.pid).begin();
         }
         struct method_type method = {.addr=method_addr, .ret=it.first.ret, .name=method_name};
-	auto p = mout.find(method);
+	auto p = mout.find(method);   // use method_name to remove duplicated rows
 	if ( p==mout.end() ){
 	    mout.insert(pair<method_type,int>(method, (int)it.second));
 	}else{
@@ -700,9 +709,11 @@ void PrintTopMethods(int N){
     //cout<<"flip method done, printing ("<< rmap.size()<<")"<<endl;
     int i=0;
     method_type methods[N];
+    vector<string> vs;
     for (multimap<int,method_type>::const_reverse_iterator it = rmap.rbegin(); it!=rmap.rend(); ++it){
         fprintf(out_cpu, "%d\t %lx\t %s\n", it->first, it->second.addr, it->second.name.c_str() );
-	if (i<N) methods[i++]=it->second;
+        vs.push_back(it->second.name);
+        if (i<N) methods[i++]=it->second;
     }
     //cout<<"method array done, printing ("<< n<<")"<<endl;
     if(COUNT_TOP_N>0){
@@ -716,8 +727,9 @@ void PrintTopMethods(int N){
         }
     }
     fclose(out_cpu);
+    return vs;
 }
-void PrintFlame(){
+vector<string> PrintFlame(){
     auto table = bpf.get_hash_table<stack_key_t, uint64_t>("counts").get_table_offline();
     sort( table.begin(), table.end(),
       [](pair<stack_key_t, uint64_t> a, pair<stack_key_t, uint64_t> b) {
@@ -754,14 +766,18 @@ void PrintFlame(){
         fprintf(out_cpu, "      %ld\n", it.second);
     }
     fclose(out_cpu);
+    vector<string> vs;
+    return vs;
 }
 
-void PrintBPF(unsigned long id){
+vector<string> PrintBPF(unsigned long id){
+    vector<string> vs;
     switch((int)log2(id)){
-        case 0: PrintFlame(); break;
-        case 1: PrintThread(); break;
-        case 2: PrintTopMethods(SAMPLE_TOP_N); break;
+        case 0: return PrintFlame();
+        case 1: return PrintThread();
+        case 2: return PrintTopMethods(SAMPLE_TOP_N);
     }
+    return vs;
 }
 vector<string> parse_options(string str, char sep){
     istringstream ss(str);
@@ -831,6 +847,17 @@ void gen_perf_file(){
     registerCapa(jvmti);
     registerCall(jvmti);
     enableEvent(jvmti);
+    jvmti->SetHeapSamplingInterval(10*1024*1024); //10m
+}
+void read_cfg(string filename){
+    //java/util/HashMap  DEFAULT_INITIAL_CAPACITY  I  +  2048  *2  java.util.HashMap.resize
+    ifstream in(filename.c_str());
+    if(!in) cerr<<"Error open cfg file:"<<filename<<endl;
+    string str;
+    while(getline(in,str)){
+        if(str.size()>0) TUNE_CLASS.push_back(str);
+    }
+    in.close();
 }
 int do_single_options(string k, string v){
     if (k.compare("sample_duration") == 0){
@@ -857,10 +884,8 @@ int do_single_options(string k, string v){
     }else if(k.compare("count_top")==0){
         COUNT_TOP_N=stoi(v);
     }else if(k.compare("tune_cfg")==0){
-        //java/util/HashMap       DEFAULT_INITIAL_CAPACITY        I       +       2048    *2      java.util.HashMap.resize
-        TUNE_CLASS.push_back(v);
+        read_cfg(v);
     }
-    //jvmti->SetHeapSamplingInterval(1024*1024); //1m
     return -1;
 }
 void InitFile() {
@@ -871,6 +896,12 @@ void InitFile() {
     string path = "/tmp/perf-"+pid+".map";
     cout << "perf map: "<< path<< endl;
     out_perf = fopen(path.c_str(),"w");
+}
+void print_vector(vector<string> v){
+    cout<<"print vector: "<<endl;
+    for(string s : v){
+        cout<<"    "<<s<<endl;
+    }
 }
 JNIEXPORT jint JNICALL Agent_OnLoad(JavaVM* vm, char* options, void* reserved) {
     cout << "|***************************************|"<< endl;
@@ -892,10 +923,15 @@ JNIEXPORT jint JNICALL Agent_OnLoad(JavaVM* vm, char* options, void* reserved) {
     cout << "|***************************************|"<< endl;
     StartBPF(id);
     StopBPF();
-    PrintBPF(id);
+    vector<string> results = PrintBPF(id);
+    //print_vector(results);
     if(TUNE_CLASS.size()>0){
-        for(string cls : TUNE_CLASS){
-            tune(jni, "java/util/HashMap", "DEFAULT_INITIAL_CAPACITY", "I");
+        for(string line : TUNE_CLASS){
+            vector<string> field = str_2_vec(line,'\t');
+            if (find(results.begin(), results.end(), field[5]) != results.end()){
+                //cout<<"Tune "<<line<<endl;
+                tune(jni, field[0], field[1], field[2], field[3],field[4]);
+            }
         }
     }
     cout << "Done."<< endl;
