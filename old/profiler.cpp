@@ -29,6 +29,7 @@ static JNIEnv* jni = NULL;
 static jvmtiEnv* jvmti = NULL;
 static jrawMonitorID tree_lock;
 
+static bool BPF_INIT = false;
 static int SAMPLE_TOP_N = 20;
 static int COUNT_TOP_N = 0;
 static int LAT_TOP_N = 0;
@@ -36,6 +37,7 @@ static int BPF_PERF_FREQ = 49;
 static int DURATION = 10;
 static int MON_DURATION = 5;
 static int BP_SEQ = 1;
+static int TUNING_N = 1;
 static ebpf::BPF bpf;
 static map<int,string> BPF_TXT_MAP;
 static map<int,string> BPF_FN_MAP;
@@ -291,27 +293,6 @@ static jlong get_time(jvmtiEnv* jvmti) {
     jvmti->GetTime(&current_time);
     return current_time;
 }
-static string decode_class_char(char* class_sig) {
-    //Lorg/net/XX  [I
-    switch (class_sig[1]) {
-        case 'B': return "byte";
-        case 'C': return "char";
-        case 'D': return "double";
-        case 'F': return "float";
-        case 'I': return "int";
-        case 'J': return "long";
-        case 'S': return "short";
-        case 'Z': return "boolean";
-    }
-    // rm first 'L'|'[' and last ';'
-    class_sig++;
-    class_sig[strlen(class_sig) - 1] = 0;
-    // Replace '/' with '.'
-    for (char* c = class_sig; *c; c++) {
-        if (*c == '/') *c = '.';
-    }
-    return class_sig;
-}
 static string decode_class_signature(string class_sig) {
     switch (class_sig[1]) {
         case 'B': return "byte";
@@ -411,11 +392,21 @@ void set_static_float(JNIEnv* jni, string cls_name, string field_name, float val
     jfieldID f = jni->GetStaticFieldID(cls, field_name.c_str(), "F");
     jni->SetStaticFloatField(cls,f,value);
 }
-vector<string> str_2_vec(string str, char sep){
-    istringstream ss(str);
+bool string_contains(string str, string c){
+    if (str.find(c) != string::npos) return true;
+    else return false;
+}
+bool BothAreSpaces(char lhs, char rhs ) { return (lhs == rhs) && (lhs == ' '); }
+vector<string> str_2_vec( string str, char sep){
+    string::iterator new_end = unique(str.begin(), str.end(), BothAreSpaces);
+    str.erase(new_end, str.end());
+
     vector<string> kv;
+    istringstream ss(str);
     string sub;
     while (getline(ss,sub,sep)){
+	string::iterator end_pos = remove(sub.begin(), sub.end(), ' ');
+	sub.erase(end_pos, sub.end());
         kv.push_back(sub);
     }
     return kv;
@@ -545,15 +536,18 @@ perf_event_attr AttachBreakPoint(uint64_t addr, const string& fn, int seq){
 }
 
 void StartBPF(unsigned long id) {
-    cout << "StartBPF(" << id << ")" << endl;
     int pid = getpid();
-    const string PID = "(tgid=="+to_string(pid)+")";
-    string BPF_TXT = get_bpf_text(id);
-    str_replace(BPF_TXT, "PID", PID);
-    //cout << "BPF:" << endl << BPF_TXT << endl;
-    auto init_r = bpf.init(BPF_TXT);
-    if (init_r.code() != 0) {
-        cerr << init_r.msg() << endl;
+    if (!BPF_INIT){
+        cout << "Start BPF(" << id << ")" << endl;
+        const string PID = "(tgid=="+to_string(pid)+")";
+        string BPF_TXT = get_bpf_text(id);
+        str_replace(BPF_TXT, "PID", PID);
+        //cout << "BPF:" << endl << BPF_TXT << endl;
+        auto init_r = bpf.init(BPF_TXT);
+        if (init_r.code() != 0)  cerr << init_r.msg() << endl;
+	BPF_INIT=true;
+    }else{
+        cout << "Initialized BPF(" << id << ")" << endl;
     }
     int pid2=-1;
     string fn = get_prof_func(id);
@@ -681,7 +675,7 @@ vector<string> PrintTopMethods(int N){
       }
     );
     fprintf(stdout, "count \t bp     \t ret    \t addr       \t name\n");
-    map<method_type, int> mout;
+    map<method_type, int> mout;		//addr ret name  count
     for (auto it : table) {
         uint64_t method_addr;
 	string   method_name;
@@ -885,6 +879,8 @@ int do_single_options(string k, string v){
         COUNT_TOP_N=stoi(v);
     }else if(k.compare("tune_cfg")==0){
         read_cfg(v);
+    }else if(k.compare("tune_n")==0){
+        TUNING_N=stoi(v);
     }
     return -1;
 }
@@ -901,6 +897,36 @@ void print_vector(vector<string> v){
     cout<<"print vector: "<<endl;
     for(string s : v){
         cout<<"    "<<s<<endl;
+    }
+}
+void tune_all_fields(vector<string> TUNE_OPTIONS, vector<string> results){
+    if(TUNE_OPTIONS.size()>0){
+        for(string line : TUNE_OPTIONS){
+            vector<string> field = str_2_vec(line,'\t');
+            if (find(results.begin(), results.end(), field[0]) != results.end()){
+                //java.util.HashMap.resize     java.util.HashMap$I^DEFAULT_INITIAL_CAPACITY    *2<2048
+                //print_vector(field);
+                vector<string> cls_vec = str_2_vec(field[1],'$');
+                string class_name = replace_string(cls_vec[0], '.', '/');
+                vector<string> fld_vec = str_2_vec(cls_vec[1],'^');
+                string field_name = fld_vec[1];
+                string field_type = fld_vec[0];
+                string f1 = field[2];
+                string algo ;
+                string max ;
+                if( string_contains(f1,">") ){
+                    vector<string> fv = str_2_vec(field[2],'>');
+                    algo = fv[0];
+                    max = fv[1];
+                }else{
+                    vector<string> fv = str_2_vec(field[2],'<');
+                    algo = fv[0];
+                    max = fv[1];
+                }
+                //cout<<"----------cls='"<< class_name<<"' f='"<< field_name<<"' t='"<< field_type<<"' a='"<< algo<<"' m='"<< max<<"'"<<endl;
+                tune(jni, class_name, field_name, field_type, max, algo);
+            }
+        }
     }
 }
 JNIEXPORT jint JNICALL Agent_OnLoad(JavaVM* vm, char* options, void* reserved) {
@@ -921,18 +947,12 @@ JNIEXPORT jint JNICALL Agent_OnLoad(JavaVM* vm, char* options, void* reserved) {
         }
     }
     cout << "|***************************************|"<< endl;
-    StartBPF(id);
-    StopBPF();
-    vector<string> results = PrintBPF(id);
-    //print_vector(results);
-    if(TUNE_CLASS.size()>0){
-        for(string line : TUNE_CLASS){
-            vector<string> field = str_2_vec(line,'\t');
-            if (find(results.begin(), results.end(), field[5]) != results.end()){
-                //cout<<"Tune "<<line<<endl;
-                tune(jni, field[0], field[1], field[2], field[3],field[4]);
-            }
-        }
+    for (int i=0;i<TUNING_N;i++){
+        StartBPF(id);
+        StopBPF();
+        vector<string> results = PrintBPF(id);
+        //print_vector(results);
+        tune_all_fields(TUNE_CLASS, results);
     }
     cout << "Done."<< endl;
     return 0;

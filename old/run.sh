@@ -5,7 +5,7 @@ if [ ! -f $SRC ]; then
 fi
 rm -rf $AGENT log thread.log cpu.log mem.log hs_err* jcmd.log /tmp/perf*  #flame.svg
 kill -9 `ps -ef|grep java|grep -v grep |awk '{print $2}'`
-LOOP="1000 400000"
+LOOP="2000 800000"
 JIT="-Xmx400m -Xms10m -XX:+UseParallelOldGC -XX:ParallelGCThreads=1 -XX:+PreserveFramePointer" # -XX:+DTraceMethodProbes" #-XX:+ExtendedDTraceProbes
 
 JAVA_HOME=/home/sun/jbb/jdk13
@@ -61,7 +61,7 @@ if [ $? = 0 ]; then
     #run_and_attach $AGENT "sample_duration=5;frequency=49;sample_thread=thread.log"
 
     echo "test2 method"
-    run_and_attach $AGENT "sample_duration=5;sample_top=9;sample_method=method.log;tune_cfg=tune.cfg"
+    run_and_attach $AGENT "sample_duration=3;sample_top=9;sample_method=method.log;tune_cfg=tune.cfg;tune_n=2"
 
     #echo "test3 method lat"
     #run_and_attach $AGENT "sample_duration=3;sample_top=9;sample_method=method.log;monitor_duration=1;count_top=1"
