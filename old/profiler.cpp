@@ -562,10 +562,10 @@ void StartBPF(unsigned long id) {
 void StopBPF(){
     sleep(DURATION);
     if (out_perf!=NULL){
-        writing_perf=true;
-        fclose(out_perf);
-        writing_perf=false;
-        out_perf=NULL;
+        //writing_perf=true;
+        fflush(out_perf);
+        //writing_perf=false;
+        //out_perf=NULL;
     }
     bpf.detach_perf_event(PERF_TYPE_SOFTWARE, PERF_COUNT_HW_CPU_CYCLES);
 }
@@ -630,7 +630,7 @@ void CountMethods(method_type methods[], int n){
     perf_event_attr peas[2*n];
     for (int i=0; i<n; i++){
         if (i>n-1) break;
-	int j=2*i;
+        int j=2*i;
         peas[j]  =AttachBreakPoint(methods[i].addr, "do_bp_count", i);
         peas[j+1]=AttachBreakPoint(methods[i].ret, "do_ret_count", i);
     }
@@ -666,7 +666,8 @@ void LatencyMethod(method_type method){
 }
 
 vector<string> PrintTopMethods(int N){
-    auto table = bpf.get_hash_table<method_key_t, uint64_t>("counts").get_table_offline();
+    auto t = bpf.get_hash_table<method_key_t, uint64_t>("counts");
+    auto table = t.get_table_offline();
     auto stacks = bpf.get_stack_table("stack_traces");
     cout<<"sampled "<< table.size() << " methods"<<endl;
     sort( table.begin(), table.end(),
@@ -678,7 +679,7 @@ vector<string> PrintTopMethods(int N){
     map<method_type, int> mout;		//addr ret name  count
     for (auto it : table) {
         uint64_t method_addr;
-	string   method_name;
+        string   method_name;
         if (it.first.kernel_stack_id >= 0) {
             method_addr = *stacks.get_stack_addr(it.first.kernel_stack_id).begin();
             method_name = *stacks.get_stack_symbol(it.first.kernel_stack_id, -1).begin()+"[k]";
@@ -687,13 +688,13 @@ vector<string> PrintTopMethods(int N){
             method_name = *stacks.get_stack_symbol(it.first.user_stack_id, it.first.pid).begin();
         }
         struct method_type method = {.addr=method_addr, .ret=it.first.ret, .name=method_name};
-	auto p = mout.find(method);   // use method_name to remove duplicated rows
-	if ( p==mout.end() ){
-	    mout.insert(pair<method_type,int>(method, (int)it.second));
-	}else{
-	    (*p).second += it.second;    //merge_method from different callers
-	}
-	if( mout.size() >N ) break;
+        auto p = mout.find(method);   // use method_name to remove duplicated rows
+        if ( p==mout.end() ){
+            mout.insert(pair<method_type,int>(method, (int)it.second));
+        }else{
+            (*p).second += it.second;    //merge_method from different callers
+        }
+        if( mout.size() >N ) break;
         fprintf(stdout,   "%ld\t %lx\t %lx\t, %lx\t %s\n", it.second, it.first.bp, it.first.ret, method_addr, method_name.c_str());
         //fprintf(out_cpu, "%ld\t %d\t  %d\t  %lx\t %s\n", it.second, it.first.user_stack_id, it.first.kernel_stack_id, method_addr, method_name.c_str());
     }
@@ -720,7 +721,8 @@ vector<string> PrintTopMethods(int N){
             LatencyMethod(methods[i]);
         }
     }
-    fclose(out_cpu);
+    fflush(out_cpu);
+    t.clear_table_non_atomic();
     return vs;
 }
 vector<string> PrintFlame(){
@@ -753,9 +755,9 @@ vector<string> PrintFlame(){
         while (!stack_traces.empty()){
             fprintf(out_cpu, "%s", stack_traces.top().c_str());
             stack_traces.pop();
-	    if (!stack_traces.empty()){
-	        fprintf(out_cpu, ";");
-	    }
+            if (!stack_traces.empty()){
+                fprintf(out_cpu, ";");
+            }
         }
         fprintf(out_cpu, "      %ld\n", it.second);
     }
@@ -951,16 +953,22 @@ JNIEXPORT jint JNICALL Agent_OnLoad(JavaVM* vm, char* options, void* reserved) {
         StartBPF(id);
         StopBPF();
         vector<string> results = PrintBPF(id);
-        //print_vector(results);
+        print_vector(results);
         tune_all_fields(TUNE_CLASS, results);
     }
     cout << "Done."<< endl;
     return 0;
 }
+void closeAllFiles() {
+    fclose(out_mem);
+    fclose(out_cpu);
+    fclose(out_thread);
+    fclose(out_perf);
+}
 JNIEXPORT void JNICALL Agent_OnUnload(JavaVM *vm){
     cout<<"Agent Unload."<<endl;
     disableAllEvents();
-    //closeAllFiles();
+    closeAllFiles();
 }
 JNIEXPORT jint JNICALL Agent_OnAttach(JavaVM* vm, char* options, void* reserved) {
     if (jvmti != NULL) {
