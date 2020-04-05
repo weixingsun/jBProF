@@ -13,7 +13,7 @@
 #include <stdio.h>
 #include <sys/time.h>
 #include <unistd.h>
-#include <bcc/BPF.h>
+#include <BPF.h>
 #include <jvmti.h>
 #include <linux/perf_event.h>
 #include <linux/hw_breakpoint.h>
