@@ -3,20 +3,20 @@ AGENT=profiler.so
 if [ ! -f $SRC ]; then
     mv $AGENT $SRC
 fi
-rm -rf $AGENT log thread.log cpu.log mem.log hs_err* jcmd.log /tmp/perf*  #flame.svg
-kill -9 `ps -ef|grep java|grep -v grep |awk '{print $2}'`
-LOOP="2000 400000"
-JIT="-Xmx400m -Xms10m -XX:+UseParallelOldGC -XX:ParallelGCThreads=1 -XX:+PreserveFramePointer" # -XX:+DTraceMethodProbes" #-XX:+ExtendedDTraceProbes
+sudo rm -rf $AGENT log thread.log cpu.log mem.log hs_err* jcmd.log /tmp/perf*  #flame.svg
+sudo kill -9 `pgrep java`
+LOOP="2000 4000000"
+JIT="-Xmx400m -Xms10m -XX:+UseParallelGC -XX:ParallelGCThreads=1 -XX:+PreserveFramePointer" # -XX:+DTraceMethodProbes" #-XX:+ExtendedDTraceProbes
 
-JAVA_HOME=/home/sun/jbb/jdk13
+JAVA_HOME=/home/sun/jbb/jdk14
 java_build(){
     $JAVA_HOME/bin/javac Main.java
 }
 cpp_build(){
-  BCC=/home/sun/perf_tuning_results/jvm/bcc
+  BCC=/home/sun/jbb/bcc
   BCC_INC="-I$BCC/src/cc -I$BCC/src/cc/api -I$BCC/src/cc/libbpf/include/uapi"
   CC=clang
-  CPP=clang++
+  CPP=g++
   OS=linux
   JAVA_INC="-I$JAVA_HOME/include -I$JAVA_HOME/include/$OS"
   #export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/lib/
@@ -24,7 +24,7 @@ cpp_build(){
   LIB="-shared -lbcc -lstdc++"
   #LIB="-shared -lbcc -lstdc++ "
   OPTS="-O3 -fPIC $JAVA_INC $BCC_INC $LIB"
-  #echo "$CPP -o $AGENT profiler.cpp $OPTS"
+  echo "$CPP -o $AGENT profiler.cpp $OPTS"
         $CPP -o $AGENT profiler.cpp $OPTS
 }
 
@@ -35,8 +35,8 @@ run_and_attach(){
     sleep 1
     pid=`pgrep java`
     #/usr/share/bcc/tools/tplist -p $pid
-    #echo "$JAVA_HOME/bin/jcmd $pid JVMTI.agent_load ./$AGT $OPT"
-    $JAVA_HOME/bin/jcmd $pid JVMTI.agent_load ./$AGT "\"$OPT\"" > jcmd.log 2>&1
+    echo "$JAVA_HOME/bin/jcmd $pid JVMTI.agent_load ./$AGT $OPT"
+    sudo  $JAVA_HOME/bin/jcmd $pid JVMTI.agent_load ./$AGT "\"$OPT\"" > jcmd.log 2>&1
     #python method.py -F 99 -p $pid -f 3 > profile.out
 }
 
@@ -72,7 +72,7 @@ if [ $? = 0 ]; then
 
     echo "autu-tuning"
     #run_and_attach $AGENT "sample_duration=3;sample_top=9;sample_method=method.log;tune_cfg=tune.cfg"
-    run_and_attach $AGENT "sample_duration=3;sample_top=9;sample_method=method.log;tune_cfg=tune.cfg;tune_n=3"
+    run_and_attach $AGENT "sample_duration=3;sample_top=9;sample_method=method.log;tune_cfg=tune.cfg;tune_n=3;wait=2"
 
     #run_with_agent $AGENT "sample_duration=5;sample_top=9;sample_method=method.log;tune_fields=tune.cfg"
     #echo "rule : when HashMap.resize  -> + initial_capacity"

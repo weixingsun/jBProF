@@ -34,6 +34,7 @@ static int SAMPLE_TOP_N = 20;
 static int COUNT_TOP_N = 0;
 static int LAT_TOP_N = 0;
 static int BPF_PERF_FREQ = 49;
+static int WAIT = 0;
 static int DURATION = 10;
 static int MON_DURATION = 5;
 static int BP_SEQ = 1;
@@ -883,6 +884,8 @@ int do_single_options(string k, string v){
         read_cfg(v);
     }else if(k.compare("tune_n")==0){
         TUNING_N=stoi(v);
+    }else if(k.compare("wait")==0){
+        WAIT=stoi(v);
     }
     return -1;
 }
@@ -949,6 +952,10 @@ JNIEXPORT jint JNICALL Agent_OnLoad(JavaVM* vm, char* options, void* reserved) {
         }
     }
     cout << "|***************************************|"<< endl;
+
+    cout << "|************* sleep "<<WAIT<<"s **************|"<< endl;
+    sleep(WAIT);
+
     for (int i=0;i<TUNING_N;i++){
         StartBPF(id);
         StopBPF();
