@@ -86,7 +86,7 @@ Features:
 	 >16 	 45 
 	 >32 	 34 
 
-5. Tuning: [tune.log](https://github.com/jBProF/blob/master/tune.log)  [root]
+5. Tuning: [tune.log](https://github.com/weixingsun/jBProF/blob/master/tune.log)  [root]
 
        "sample_duration=3;sample_top=9;sample_method=method.log;tune_cfg=tune.cfg;tune_n=3;until=PROF%start"
        
