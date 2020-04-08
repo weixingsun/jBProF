@@ -446,12 +446,12 @@ void tune(JNIEnv* env, string cls_name, string field_name, string field_type, st
         int v = get_static_int(env,cls_name,field_name);
         int v2 = tune_int(v,algo,max);
         set_static_int(env,cls_name,field_name, v2);
-        cout<<cls_name<<"."<<field_name<<": "<<v<<" -> "<<v2<<endl;
+        cout<<"Tune: "<<cls_name<<"."<<field_name<<": "<<v<<" -> "<<v2<<endl<<endl;
     }else if(field_type=="F"){
         float v = get_static_float(env,cls_name,field_name);
         float v2 = tune_float(v,algo,max);
         set_static_float(env,cls_name,field_name,v2);
-        cout<<cls_name<<"."<<field_name<<": "<<v<<" -> "<<v2<<endl;
+        cout<<"Tune: "<<cls_name<<"."<<field_name<<": "<<v<<" -> "<<v2<<endl<<endl;
     }
 }
 void SetupTimer(int duration, int interval, __sighandler_t timer_handler){
@@ -854,7 +854,10 @@ void read_cfg(string filename){
     if(!in) cerr<<"Error open cfg file:"<<filename<<endl;
     string str;
     while(getline(in,str)){
-        if(str.size()>0) TUNE_CLASS.push_back(str);
+        if(str.size()>0) {
+            TUNE_CLASS.push_back(str);
+            cout<<"tune: "<<str<<endl;
+        }
     }
     in.close();
 }
@@ -997,7 +1000,7 @@ JNIEXPORT jint JNICALL Agent_OnLoad(JavaVM* vm, char* options, void* reserved) {
         StartBPF(id);
         StopBPF();
         vector<string> results = PrintBPF(id);
-        print_vector(results);
+        //print_vector(results);
         tune_all_fields(TUNE_CLASS, results);
     }
     cout << "Done."<< endl;
