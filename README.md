@@ -95,7 +95,7 @@ Features:
         sample_duration=3
         sample_top=9
         sample_method=method.log
-        tune: java.util.HashMap.resize	java.util.HashMap$I^DEFAULT_INITIAL_CAPACITY 	x2<1024
+        tune: java.util.HashMap.resize	java.util.HashMap$I^DEFAULT_INITIAL_CAPACITY 	x4<1024
         tune: java.util.ArrayList.grow	java.util.ArrayList$I^DEFAULT_CAPACITY       	x2<2048
         tune: java.util.HashMap.getNode	java.util.HashMap$F^DEFAULT_LOAD_FACTOR      	-0.05>0.2
         tune_n=3
@@ -117,7 +117,7 @@ Features:
        45	 7f81277c0910	 7f811054c138	, 7f811054a7ca	 Main.count
        39	 7f81277c0890	 7f811054af54	, 7f8110547e88	 java.util.HashMap.resize
        38	 7f81277c0910	 7f811054c138	, 7f811054a8c8	 Main.count
-       java/util/HashMap.DEFAULT_INITIAL_CAPACITY: 16 -> 32
+       java/util/HashMap.DEFAULT_INITIAL_CAPACITY: 16 -> 64
        
        Initialized BPF(4)
        attached fn:do_perf_event_method to pid:1314 perf event 
@@ -133,23 +133,24 @@ Features:
        30	 7f81277c0780	 7f811054af54	, 7f8110547e8d	 java.util.HashMap.resize
        28	 7f81277c0800	 7f811054c138	, 7f811054a8c8	 Main.count
        28	 7f81277c0800	 7f811054c138	, 7f811054a8e4	 Main.count
-       java/util/HashMap.DEFAULT_INITIAL_CAPACITY: 32 -> 64
+       java/util/HashMap.DEFAULT_INITIAL_CAPACITY: 64 -> 256
 
        Initialized BPF(4)
        attached fn:do_perf_event_method to pid:1314 perf event 
        BPF sampling 3 seconds
        sampled 349 methods
        count 	 bp     	 ret    	 addr       	 name
-       95	 7f81277c0990	 7f811054d7cc	, 7f811054abcf	 Main.count
-       91	 7f81277c0910	 7f811054af54	, 7f8110547ec9	 java.util.HashMap.resize
-       73	 7f81277c0910	 7f811054af54	, 7f8110547e90	 java.util.HashMap.resize
-       45	 7f81277c0990	 7f811054d7cc	, 7f811054a9bc	 Main.count
-       36	 7f81277c0990	 7f811054d7cc	, 7f811054aceb	 Main.count
-       35	 7f81277c0910	 7f811054af54	, 7f8110547dcb	 java.util.HashMap.resize
-       33	 7f81277c0990	 7f811054d7cc	, 7f811054a8c8	 Main.count
-       30	 7f81277c0910	 7f811054af54	, 7f8110547e88	 java.util.HashMap.resize
-       27	 7f81277c0990	 7f811054d7cc	, 7f811054abcd	 Main.count
-       java/util/HashMap.DEFAULT_INITIAL_CAPACITY: 64 -> 128
+       110	 7f68bf916990	 7f68a854f44c	, 7f68a854c84b	 Main.count
+       73	 7f68bf916910	 7f68a854cbd0	, 7f68a85478e3	 java.util.HashMap.resize
+       64	 7f68bf916910	 7f68a854cbd0	, 7f68a8547928	 java.util.HashMap.resize
+       39	 7f68bf916910	 7f68a854cbd0	, 7f68a85478db	 java.util.HashMap.resize
+       36	 7f68bf916990	 7f68a854f44c	, 7f68a854c964	 Main.count
+       30	 7f68bf916990	 7f68a854f44c	, 7f68a854c523	 Main.count
+       29	 7f68bf916990	 7f68a854f44c	, 7f68a854c83b	 Main.count
+       28	 7f68bf916990	 7f68a854f44c	, 7f68a854c542	 Main.count
+       28	 7f68bf916990	 7f68a854f44c	, 7f68a854c638	 Main.count
+       27	 7f68bf916800	 7f68a854ddb8	, 7f68a854c84b	 Main.count
+       java/util/HashMap.DEFAULT_INITIAL_CAPACITY: 256 -> 1024
        Done.
     
 Install:
