@@ -95,8 +95,8 @@ Features:
         sample_duration=3
         sample_top=9
         sample_method=method.log
-        tune: java.util.HashMap.resize	java.util.HashMap$I^DEFAULT_INITIAL_CAPACITY 	*2<1024
-	tune: java.util.ArrayList.grow	java.util.ArrayList$I^DEFAULT_CAPACITY       	*2<2048
+        tune: java.util.HashMap.resize	java.util.HashMap$I^DEFAULT_INITIAL_CAPACITY 	x2<1024
+	tune: java.util.ArrayList.grow	java.util.ArrayList$I^DEFAULT_CAPACITY       	x2<2048
 	tune: java.util.HashMap.getNode	java.util.HashMap$F^DEFAULT_LOAD_FACTOR      	-0.05>0.2
         tune_n=3
         until=PROF%start
