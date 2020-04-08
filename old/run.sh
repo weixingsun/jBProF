@@ -8,7 +8,7 @@ sudo kill -9 `pgrep java`
 LOOP="2000 4000000"
 JIT="-Xmx400m -Xms10m -XX:+UseParallelGC -XX:ParallelGCThreads=1 -XX:+PreserveFramePointer" # -XX:+DTraceMethodProbes" #-XX:+ExtendedDTraceProbes
 
-JAVA_HOME=/home/sun/jbb/jdk14
+JAVA_HOME=/home/sun/jbb/jdk
 java_build(){
     $JAVA_HOME/bin/javac Main.java
 }
@@ -71,8 +71,8 @@ if [ $? = 0 ]; then
     #run_with_agent $AGENT "sample_duration=10;sample_mem=mem.log;mon_size=1"
 
     echo "autu-tuning"
-    #run_and_attach $AGENT "sample_duration=3;sample_top=9;sample_method=method.log;tune_cfg=tune.cfg"
-    run_and_attach $AGENT "sample_duration=3;sample_top=9;sample_method=method.log;tune_cfg=tune.cfg;tune_n=3;wait=1;until=method.log%Ready"
+    #run_and_attach $AGENT "sample_duration=3;sample_top=9;sample_method=method.log;tune_cfg=tune.cfg;wait=1"
+    run_and_attach $AGENT "sample_duration=3;sample_top=9;sample_method=method.log;tune_cfg=tune.cfg;tune_n=3;until=.PROF%start"
 
     #run_with_agent $AGENT "sample_duration=5;sample_top=9;sample_method=method.log;tune_fields=tune.cfg"
     #echo "rule : when HashMap.resize  -> + initial_capacity"
