@@ -157,7 +157,7 @@ Install:
 
     1.install BCC & dependencies
     2.install clang
-    3.install JDK (13 tested)
+    3.install JDK (OpenJDK 10,11,12,13,14 tested)
     4.run.sh
 
 TODO:
