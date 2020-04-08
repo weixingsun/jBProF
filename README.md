@@ -86,13 +86,71 @@ Features:
 	 >16 	 45 
 	 >32 	 34 
 
-5. Tuning: [tune.log] (https://github.com/jBProF/blob/master/tune.log)
-    
-    "sample_duration=3;sample_top=9;sample_method=method.log;tune_cfg=tune.cfg;tune_n=3;until=PROF%start"
-    
-    tune.cfg
-    
-        
+5. Tuning: [tune.log](https://github.com/jBProF/blob/master/tune.log)
+
+       "sample_duration=3;sample_top=9;sample_method=method.log;tune_cfg=tune.cfg;tune_n=3;until=PROF%start"
+       
+       |***************************************|
+        perf map: /tmp/perf-1314.map
+        sample_duration=3
+        sample_top=9
+        sample_method=method.log
+        tune: java.util.HashMap.resize	java.util.HashMap$I^DEFAULT_INITIAL_CAPACITY 	*2<1024
+	tune: java.util.ArrayList.grow	java.util.ArrayList$I^DEFAULT_CAPACITY       	*2<2048
+	tune: java.util.HashMap.getNode	java.util.HashMap$F^DEFAULT_LOAD_FACTOR      	-0.05>0.2
+        tune_n=3
+        until=PROF%start
+       |***************************************|
+       |************* sleep 0s **************|
+       found text=start in PROF
+       Start BPF
+       attached fn:do_perf_event_method to pid:1314 perf event 
+       BPF sampling 3 seconds
+       sampled 329 methods
+       count 	 bp     	 ret    	 addr       	 name
+       138	 7f81277c0910	 7f811054c138	, 7f811054abcf	 Main.count
+       126	 7f81277c0890	 7f811054af54	, 7f8110547ec9	 java.util.HashMap.resize
+       103	 7f81277c0890	 7f811054af54	, 7f8110547e90	 java.util.HashMap.resize
+       60	 7f81277c0890	 7f811054af54	, 7f8110547dcb	 java.util.HashMap.resize
+       54	 7f81277c0910	 7f811054c138	, 7f811054abbf	 Main.count
+       51	 7f81277c0910	 7f811054c138	, 7f811054aceb	 Main.count
+       45	 7f81277c0910	 7f811054c138	, 7f811054a7ca	 Main.count
+       39	 7f81277c0890	 7f811054af54	, 7f8110547e88	 java.util.HashMap.resize
+       38	 7f81277c0910	 7f811054c138	, 7f811054a8c8	 Main.count
+       java/util/HashMap.DEFAULT_INITIAL_CAPACITY: 16 -> 32
+       
+       Initialized BPF(4)
+       attached fn:do_perf_event_method to pid:1314 perf event 
+       BPF sampling 3 seconds
+       sampled 298 methods
+       count 	 bp     	 ret    	 addr       	 name
+       73	 7f81277c0780	 7f811054af54	, 7f8110547e90	 java.util.HashMap.resize
+       62	 7f81277c0780	 7f811054af54	, 7f8110547ec9	 java.util.HashMap.resize
+       59	 7f81277c0800	 7f811054c138	, 7f811054abcf	 Main.count
+       40	 7f81277c0800	 7f811054c138	, 7f811054abbf	 Main.count
+       34	 7f81277c0780	 7f811054af54	, 7f8110547dcb	 java.util.HashMap.resize
+       33	 7f81277c0800	 7f811054c138	, 7f811054abcd	 Main.count
+       30	 7f81277c0780	 7f811054af54	, 7f8110547e8d	 java.util.HashMap.resize
+       28	 7f81277c0800	 7f811054c138	, 7f811054a8c8	 Main.count
+       28	 7f81277c0800	 7f811054c138	, 7f811054a8e4	 Main.count
+       java/util/HashMap.DEFAULT_INITIAL_CAPACITY: 32 -> 64
+
+       Initialized BPF(4)
+       attached fn:do_perf_event_method to pid:1314 perf event 
+       BPF sampling 3 seconds
+       sampled 349 methods
+       count 	 bp     	 ret    	 addr       	 name
+       95	 7f81277c0990	 7f811054d7cc	, 7f811054abcf	 Main.count
+       91	 7f81277c0910	 7f811054af54	, 7f8110547ec9	 java.util.HashMap.resize
+       73	 7f81277c0910	 7f811054af54	, 7f8110547e90	 java.util.HashMap.resize
+       45	 7f81277c0990	 7f811054d7cc	, 7f811054a9bc	 Main.count
+       36	 7f81277c0990	 7f811054d7cc	, 7f811054aceb	 Main.count
+       35	 7f81277c0910	 7f811054af54	, 7f8110547dcb	 java.util.HashMap.resize
+       33	 7f81277c0990	 7f811054d7cc	, 7f811054a8c8	 Main.count
+       30	 7f81277c0910	 7f811054af54	, 7f8110547e88	 java.util.HashMap.resize
+       27	 7f81277c0990	 7f811054d7cc	, 7f811054abcd	 Main.count
+       java/util/HashMap.DEFAULT_INITIAL_CAPACITY: 64 -> 128
+       Done.
     
 Install:
 
@@ -100,3 +158,10 @@ Install:
     2.install clang
     3.install JDK (13 tested)
     4.run.sh
+
+TODO:
+    
+    1. remove duplicated method entries, currently BCC use IP as method entry.
+    2. add feature to get instance level variable values, like ArrayList.size, HashMap.size
+    3. add feature to trigger tuning when a method latency > threshold.
+    4. add feature to tune performance based on bayesian optimization.
