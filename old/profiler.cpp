@@ -29,6 +29,9 @@ static JNIEnv* jni = NULL;
 static jvmtiEnv* jvmti = NULL;
 static jrawMonitorID tree_lock;
 
+static bool UNTIL = true;
+static FILE* UNTIL_FILE;
+static string UNTIL_TEXT;
 static bool BPF_INIT = false;
 static int SAMPLE_TOP_N = 20;
 static int COUNT_TOP_N = 0;
@@ -886,6 +889,11 @@ int do_single_options(string k, string v){
         TUNING_N=stoi(v);
     }else if(k.compare("wait")==0){
         WAIT=stoi(v);
+    }else if(k.compare("until")==0){
+        UNTIL=false;
+        vector<string> uv = str_2_vec(v,'%');
+	UNTIL_FILE=fopen(uv[0].c_str(), "w");
+	UNTIL_TEXT=uv[1];
     }
     return -1;
 }
@@ -934,6 +942,11 @@ void tune_all_fields(vector<string> TUNE_OPTIONS, vector<string> results){
         }
     }
 }
+int file_search(FILE* file, string text){
+    cout<<"text="<<text<<endl;
+    //
+    return 0;
+}
 JNIEXPORT jint JNICALL Agent_OnLoad(JavaVM* vm, char* options, void* reserved) {
     cout << "|***************************************|"<< endl;
     InitFile();
@@ -955,7 +968,11 @@ JNIEXPORT jint JNICALL Agent_OnLoad(JavaVM* vm, char* options, void* reserved) {
 
     cout << "|************* sleep "<<WAIT<<"s **************|"<< endl;
     sleep(WAIT);
-
+    while(!UNTIL){
+        int t = file_search(UNTIL_FILE, UNTIL_TEXT);
+        if (t>0) sleep( t );
+        else UNTIL=true;
+    }
     for (int i=0;i<TUNING_N;i++){
         StartBPF(id);
         StopBPF();
@@ -971,6 +988,7 @@ void closeAllFiles() {
     fclose(out_cpu);
     fclose(out_thread);
     fclose(out_perf);
+    if(UNTIL_FILE) fclose(UNTIL_FILE);
 }
 JNIEXPORT void JNICALL Agent_OnUnload(JavaVM *vm){
     cout<<"Agent Unload."<<endl;

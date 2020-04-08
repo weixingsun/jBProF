@@ -13,10 +13,10 @@ java_build(){
     $JAVA_HOME/bin/javac Main.java
 }
 cpp_build(){
-  BCC=/home/sun/perf_tuning_results/jvm/bcc
+  BCC=/home/sun/jbb/bcc
   BCC_INC="-I$BCC/src/cc -I$BCC/src/cc/api -I$BCC/src/cc/libbpf/include/uapi"
   CC=clang
-  CPP=clang++
+  CPP=g++
   OS=linux
   JAVA_INC="-I$JAVA_HOME/include -I$JAVA_HOME/include/$OS"
   #export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/lib/

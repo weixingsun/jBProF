@@ -72,7 +72,7 @@ if [ $? = 0 ]; then
 
     echo "autu-tuning"
     #run_and_attach $AGENT "sample_duration=3;sample_top=9;sample_method=method.log;tune_cfg=tune.cfg"
-    run_and_attach $AGENT "sample_duration=3;sample_top=9;sample_method=method.log;tune_cfg=tune.cfg;tune_n=3;wait=2"
+    run_and_attach $AGENT "sample_duration=3;sample_top=9;sample_method=method.log;tune_cfg=tune.cfg;tune_n=3;wait=1;until=method.log%Ready"
 
     #run_with_agent $AGENT "sample_duration=5;sample_top=9;sample_method=method.log;tune_fields=tune.cfg"
     #echo "rule : when HashMap.resize  -> + initial_capacity"
