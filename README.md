@@ -165,4 +165,4 @@ TODO:
     1. remove duplicated method entries, currently BCC use IP as method entry.
     2. add feature to get instance level variable values, like ArrayList.size, HashMap.size
     3. add feature to trigger tuning when a method latency > threshold.
-    4. add feature to tune performance based on bayesian optimization.
+    4. add feature to tune performance based on PCA.
