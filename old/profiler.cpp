@@ -5,6 +5,7 @@
 #include <math.h>
 #include <map>
 #include <stack>
+#include <fcntl.h>
 #include <fstream>
 #include <iostream>
 #include <sstream>
@@ -12,6 +13,9 @@
 #include <stdarg.h>
 #include <stdio.h>
 #include <sys/time.h>
+#include <sys/stat.h>
+#include <sys/socket.h>
+#include <sys/un.h>
 #include <unistd.h>
 #include <BPF.h>
 #include <jvmti.h>
@@ -1022,4 +1026,131 @@ JNIEXPORT jint JNICALL Agent_OnAttach(JavaVM* vm, char* options, void* reserved)
         return 0;
     }
     return Agent_OnLoad(vm, options, reserved);
+}
+
+static int check_socket(int pid) {
+    const char* path = ("/tmp/.java_pid"+to_string(pid)).c_str();
+    struct stat stats;
+    return stat(path, &stats) == 0 && S_ISSOCK(stats.st_mode);
+}
+static int connect_socket(int pid) {
+    int fd = socket(PF_UNIX, SOCK_STREAM, 0);
+    if (fd == -1) {
+        return -1;
+    }
+    
+    struct sockaddr_un addr;
+    addr.sun_family = AF_UNIX;
+    int bytes = snprintf(addr.sun_path, sizeof(addr.sun_path), "/tmp/.java_pid%d", pid);
+    if (bytes >= sizeof(addr.sun_path)) {
+        addr.sun_path[sizeof(addr.sun_path) - 1] = 0;
+    }
+
+    if (connect(fd, (struct sockaddr*)&addr, sizeof(addr)) == -1) {
+        close(fd);
+        return -1;
+    }
+    return fd;
+}
+static int start_attach_mechanism(int pid, int nspid) {
+    const char* path = ("/proc/"+to_string(nspid)+"/cwd/.attach_pid"+to_string(nspid)).c_str();
+    int fd = creat(path, 0660);
+    if (fd == -1 || close(fd) == 0 ) {
+        path = ("/tmp/.attach_pid"+to_string(nspid)).c_str();
+        fd = creat(path, 0660);
+        if (fd == -1) {
+            return 0;
+        }
+        close(fd);
+    }
+    
+    // We have to still use the host namespace pid here for the kill() call
+    kill(pid, SIGQUIT);
+    
+    int result;
+    struct timespec ts = {0, 100000000};
+    int retry = 0;
+    do {
+        nanosleep(&ts, NULL);
+        result = check_socket(nspid);
+    } while (!result && ++retry < 10);
+
+    unlink(path);
+    return result;
+}
+static int write_command(int fd, int argc, char** argv) {
+    // Protocol version
+    if (write(fd, "1", 2) <= 0) {
+        return 0;
+    }
+
+    int i;
+    for (i = 0; i < 4; i++) {
+        const char* arg = i < argc ? argv[i] : "";
+        if (write(fd, arg, strlen(arg) + 1) <= 0) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+static int read_response(int fd) {
+    char buf[8192];
+    ssize_t bytes = read(fd, buf, sizeof(buf) - 1);
+    if (bytes <= 0) {
+        perror("Error reading response");
+        return 1;
+    }
+
+    // First line of response is the command result code
+    buf[bytes] = 0;
+    int result = atoi(buf);
+
+    do {
+        fwrite(buf, 1, bytes, stdout);
+        bytes = read(fd, buf, sizeof(buf));
+    } while (bytes > 0);
+
+    return result;
+}
+
+int main(int argc, char** argv) {
+    if (argc < 3) {
+        printf("jattach v0.1 built on " __DATE__ "\n"
+               "Copyright 2018 Andrei Pangin\n"
+               "\n"
+               "Usage: jattach <pid> <cmd> [args ...]\n");
+        return 1;
+    }
+    int nspid = getpid();
+    int pid = nspid;
+
+    signal(SIGPIPE, SIG_IGN);
+
+    if (!check_socket(nspid) && !start_attach_mechanism(pid, nspid)) {
+        perror("Could not start attach mechanism");
+        return 1;
+    }
+
+    int fd = connect_socket(nspid);
+    if (fd == -1) {
+        perror("Could not connect to socket");
+        return 1;
+    }
+    
+    printf("Connected to remote JVM\n");
+    if (!write_command(fd, argc - 2, argv + 2)) {
+        perror("Error writing to socket");
+        close(fd);
+        return 1;
+    }
+
+    printf("Response code = ");
+    fflush(stdout);
+
+    int result = read_response(fd);
+    printf("\n");
+    close(fd);
+
+    return result;
 }
