@@ -1052,7 +1052,7 @@ static int connect_socket(int pid) {
     }
     return fd;
 }
-static int start_attach_mechanism(int pid, int nspid) {
+static int start_attach_socket(int pid, int nspid) {
     const char* path = ("/proc/"+to_string(nspid)+"/cwd/.attach_pid"+to_string(nspid)).c_str();
     int fd = creat(path, 0660);
     if (fd == -1 || close(fd) == 0 ) {
@@ -1114,25 +1114,27 @@ static int read_response(int fd) {
     return result;
 }
 
-int main(int argc, char** argv) {
+int main(int argc, char* argv[]) {
     if (argc < 3) {
-        printf("jattach v0.1 built on " __DATE__ "\n"
-               "Copyright 2018 Andrei Pangin\n"
-               "\n"
-               "Usage: jattach <pid> <cmd> [args ...]\n");
+        printf("jBProF v" __DATE__ "Copyright 2020 Weixing.Sun@Gmail.Com\nUsage: ./jbprof <pid> <opt> \n");
         return 1;
     }
-    int nspid = getpid();
-    int pid = nspid;
-
+    cout<<"jBProF standalone: "<<argv[0]<<" "<<argv[1]<<" "<<argv[2]<<endl;
+    int pid = atoi(argv[1]);
+    string opts = argv[2];
+    //simulate VirtualMachineImpl.java
     signal(SIGPIPE, SIG_IGN);
 
-    if (!check_socket(nspid) && !start_attach_mechanism(pid, nspid)) {
-        perror("Could not start attach mechanism");
+    //if (!check_socket(pid)) {
+    //    perror("Could not start socket");
+    //    return 1;
+    //}
+    if (!start_attach_socket(pid, pid)) {
+        perror("Could not attach");
         return 1;
     }
 
-    int fd = connect_socket(nspid);
+    int fd = connect_socket(pid);
     if (fd == -1) {
         perror("Could not connect to socket");
         return 1;

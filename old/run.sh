@@ -1,9 +1,7 @@
 SRC=profiler.cpp
 AGENT=profiler.so
-if [ ! -f $SRC ]; then
-    mv $AGENT $SRC
-fi
-sudo rm -rf $AGENT log thread.log cpu.log mem.log hs_err* jcmd.log /tmp/perf*  #flame.svg
+BIN=jbprof
+sudo rm -rf $AGENT $BIN log thread.log cpu.log mem.log hs_err* jcmd.log /tmp/perf*  #flame.svg
 sudo kill -9 `pgrep java`
 LOOP="2000 4000000"
 JIT="-Xmx400m -Xms10m -XX:+UseParallelGC -XX:ParallelGCThreads=1 -XX:+PreserveFramePointer" # -XX:+DTraceMethodProbes" #-XX:+ExtendedDTraceProbes
@@ -17,17 +15,32 @@ cpp_build(){
   BCC_INC="-I$BCC/src/cc -I$BCC/src/cc/api -I$BCC/src/cc/libbpf/include/uapi"
   CC=clang
   CPP=g++
+  #CPP=clang++
   OS=linux
   JAVA_INC="-I$JAVA_HOME/include -I$JAVA_HOME/include/$OS"
   #export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/lib/
   #export LIBRARY_PATH=$LIBRARY_PATH:/usr/local/lib/
-  LIB="-shared -lbcc -lstdc++"
+  #LIB="-lbcc -lstdc++"
+  LIB="-lbcc"
   #LIB="-shared -lbcc -lstdc++ "
-  OPTS="-O3 -fPIC $JAVA_INC $BCC_INC $LIB"
-  echo "$CPP -o $AGENT profiler.cpp $OPTS"
-        $CPP -o $AGENT profiler.cpp $OPTS
+  #OPTS="-O3 -fPIC -shared $JAVA_INC $BCC_INC $LIB"
+  #echo "$CPP $SRC $OPTS -o $AGENT"
+  #      $CPP $SRC $OPTS -o $AGENT
+  #echo "agent done."
+  OPTS="-g -O0 $JAVA_INC $BCC_INC $LIB"
+  echo "$CPP $SRC $OPTS -o $BIN"
+        $CPP $SRC $OPTS -o $BIN
+  #echo "binary done."
 }
 
+attach(){
+    echo "$JAVA_HOME/bin/java $JIT Main $LOOP"
+    time $JAVA_HOME/bin/java $JIT Main $LOOP &
+    sleep 1
+    pid=`pgrep java`
+    OPT=$1
+    sudo ./$BIN $pid "$OPT" 
+}
 run_and_attach(){
     AGT=$1
     OPT=$2
@@ -70,9 +83,12 @@ if [ $? = 0 ]; then
     #run_with_agent $AGENT "sample_duration=10;sample_mem=mem.log;count_alloc=1"
     #run_with_agent $AGENT "sample_duration=10;sample_mem=mem.log;mon_size=1"
 
-    echo "autu-tuning"
+    #echo "autu-tuning"
     #run_and_attach $AGENT "sample_duration=3;sample_top=9;sample_method=method.log;tune_cfg=tune.cfg;wait=1"
-    run_and_attach $AGENT "sample_duration=3;sample_top=9;sample_method=method.log;tune_cfg=tune.cfg;tune_n=3;until=.PROF%start"
+    #run_and_attach $AGENT "sample_duration=3;sample_top=9;sample_method=method.log;tune_cfg=tune.cfg;tune_n=3;until=.PROF%start"
+
+    echo "standalone attach"
+    attach "sample_duration=3;sample_top=9;sample_method=method.log;tune_cfg=tune.cfg;tune_n=3;until=.PROF%start"
 
     #run_with_agent $AGENT "sample_duration=5;sample_top=9;sample_method=method.log;tune_fields=tune.cfg"
     #echo "rule : when HashMap.resize  -> + initial_capacity"
