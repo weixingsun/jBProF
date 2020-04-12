@@ -1029,9 +1029,11 @@ JNIEXPORT jint JNICALL Agent_OnAttach(JavaVM* vm, char* options, void* reserved)
 }
 
 static int check_socket(int pid) {
-    const char* path = ("/tmp/.java_pid"+to_string(pid)).c_str();
+    string path = "/tmp/.java_pid"+to_string(pid);
+    //cout<<"check_socket: "<<path<<endl;
+    const char* cpath = path.c_str();
     struct stat stats;
-    return stat(path, &stats) == 0 && S_ISSOCK(stats.st_mode);
+    return stat(cpath, &stats) == 0 && S_ISSOCK(stats.st_mode);
 }
 static int connect_socket(int pid) {
     int fd = socket(PF_UNIX, SOCK_STREAM, 0);
@@ -1045,52 +1047,53 @@ static int connect_socket(int pid) {
     if (bytes >= sizeof(addr.sun_path)) {
         addr.sun_path[sizeof(addr.sun_path) - 1] = 0;
     }
-
     if (connect(fd, (struct sockaddr*)&addr, sizeof(addr)) == -1) {
         close(fd);
         return -1;
     }
+    //cout<<"connected socket: "<<fd<<" "<<addr.sun_path<<endl;
     return fd;
 }
-static int start_attach_socket(int pid, int nspid) {
-    const char* path = ("/proc/"+to_string(nspid)+"/cwd/.attach_pid"+to_string(nspid)).c_str();
-    int fd = creat(path, 0660);
+static int create_attach_socket(int pid) {
+    string path = "/proc/"+to_string(pid)+"/cwd/.attach_pid"+to_string(pid);
+    const char* cpath = path.c_str();
+    int fd = creat(cpath, 0660);
+    //cout<<"create ("<<fd<<") '"<<cpath<<"'"<<endl;
     if (fd == -1 || close(fd) == 0 ) {
-        path = ("/tmp/.attach_pid"+to_string(nspid)).c_str();
-        fd = creat(path, 0660);
+        path = ("/tmp/.attach_pid"+to_string(pid)).c_str();
+        fd = creat(cpath, 0660);
+        //cout<<"create ("<<fd<<") "<<cpath<<endl;
         if (fd == -1) {
             return 0;
         }
         close(fd);
     }
-    
-    // We have to still use the host namespace pid here for the kill() call
     kill(pid, SIGQUIT);
+    //cout<<"kill "<<pid<<endl;
     
     int result;
-    struct timespec ts = {0, 100000000};
+    struct timespec ts = {0, 100*1000*1000};
     int retry = 0;
     do {
         nanosleep(&ts, NULL);
-        result = check_socket(nspid);
+        result = check_socket(pid);
     } while (!result && ++retry < 10);
-
-    unlink(path);
+    //cout<<"check_socket: result="<<result<<" retry="<<retry<<endl;
+    unlink(cpath);
     return result;
 }
-static int write_command(int fd, int argc, char** argv) {
-    // Protocol version
-    if (write(fd, "1", 2) <= 0) {
-        return 0;
+static void CMD(int s, string m){
+    int i = write(s, m.c_str(), m.size()+1);
+}
+static int write_command(int s, string opts) {
+    //<ver>0<cmd>0<arg>0<arg>0<arg>0
+    CMD(s, "1");
+    vector<string> vo = str_2_vec(opts,' ');
+    for (string o : vo){
+	cout<<"("<<o.size()<<")  "<<o<<endl;
+        CMD(s, o);
     }
-
-    int i;
-    for (i = 0; i < 4; i++) {
-        const char* arg = i < argc ? argv[i] : "";
-        if (write(fd, arg, strlen(arg) + 1) <= 0) {
-            return 0;
-        }
-    }
+    CMD(s, "");
     return 1;
 }
 
@@ -1115,22 +1118,17 @@ static int read_response(int fd) {
 }
 
 int main(int argc, char* argv[]) {
-    if (argc < 3) {
-        printf("jBProF v" __DATE__ "Copyright 2020 Weixing.Sun@Gmail.Com\nUsage: ./jbprof <pid> <opt> \n");
+    // VirtualMachineImpl.java
+    if (argc < 4) {
+        printf("jBProF v" __DATE__ "Copyright 2020 Weixing.Sun@Gmail.Com\nUsage: ./jbprof <pid> <agent> <opt> \n");
         return 1;
     }
-    cout<<"jBProF standalone: "<<argv[0]<<" "<<argv[1]<<" "<<argv[2]<<endl;
     int pid = atoi(argv[1]);
-    string opts = argv[2];
-    //simulate VirtualMachineImpl.java
+    string opts = "load /"+string(argv[2])+" "+string(argv[3]);
+    cout<<"write_cmd: "<<opts<<endl;
     signal(SIGPIPE, SIG_IGN);
-
-    //if (!check_socket(pid)) {
-    //    perror("Could not start socket");
-    //    return 1;
-    //}
-    if (!start_attach_socket(pid, pid)) {
-        perror("Could not attach");
+    if (!check_socket(pid) && !create_attach_socket(pid)) {
+        perror("Cannot create socket");
         return 1;
     }
 
@@ -1140,18 +1138,16 @@ int main(int argc, char* argv[]) {
         return 1;
     }
     
-    printf("Connected to remote JVM\n");
-    if (!write_command(fd, argc - 2, argv + 2)) {
+    printf("Connected to remote JVM: %d\n",pid);
+    if (!write_command(fd, opts)) {
         perror("Error writing to socket");
         close(fd);
         return 1;
     }
 
-    printf("Response code = ");
     fflush(stdout);
-
     int result = read_response(fd);
-    printf("\n");
+    //cout<<"response: "<<result<<endl;
     close(fd);
 
     return result;
