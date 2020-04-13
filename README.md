@@ -7,8 +7,9 @@
 
 Features: 
 
-    Agent:   java -agentpath:./profiler.so=$OPTS
-    Attach:  jcmd $pid JVMTI.agent_load ./profiler.so $OPTS
+    Agent:   java -agentpath:./libprof.so=$OPTS
+    Attach:  jcmd $pid JVMTI.agent_load ./libprof.so $OPTS
+    Binary:  ./jbprof $pid `pwd`/libprof.so $OPT
     
     WHERE $OPTS equals to:
 
