@@ -300,6 +300,10 @@ static jlong get_time(jvmtiEnv* jvmti) {
     jvmti->GetTime(&current_time);
     return current_time;
 }
+static void msleep(int N){
+    struct timespec ts = {0, N*1000*1000};
+    nanosleep(&ts, NULL);
+}
 static string decode_class_signature(string class_sig) {
     switch (class_sig[1]) {
         case 'B': return "byte";
@@ -1072,7 +1076,7 @@ static int create_attach_socket(int pid) {
     //cout<<"kill "<<pid<<endl;
     
     int result;
-    struct timespec ts = {0, 100*1000*1000};
+    struct timespec ts = {0, 300*1000*1000};
     int retry = 0;
     do {
         nanosleep(&ts, NULL);
@@ -1087,10 +1091,11 @@ static void CMD(int s, string m){
 }
 static int write_command(int s, string opts) {
     //<ver>0<cmd>0<arg>0<arg>0<arg>0
+    //msleep(10);
     CMD(s, "1");
     vector<string> vo = str_2_vec(opts,' ');
     for (string o : vo){
-	cout<<"("<<o.size()<<")  "<<o<<endl;
+	cout<<"("<<o.size()<<")\t"<<o<<endl;
         CMD(s, o);
     }
     CMD(s, "");
@@ -1105,7 +1110,6 @@ static int read_response(int fd) {
         return 1;
     }
 
-    // First line of response is the command result code
     buf[bytes] = 0;
     int result = atoi(buf);
 
@@ -1124,8 +1128,8 @@ int main(int argc, char* argv[]) {
         return 1;
     }
     int pid = atoi(argv[1]);
-    string opts = "load /"+string(argv[2])+" "+string(argv[3]);
-    cout<<"write_cmd: "<<opts<<endl;
+    string opts = "load "+string(argv[2])+" true "+string(argv[3]);
+    //cout<<"write_cmd: "<<opts<<endl;
     signal(SIGPIPE, SIG_IGN);
     if (!check_socket(pid) && !create_attach_socket(pid)) {
         perror("Cannot create socket");

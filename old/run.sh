@@ -1,6 +1,6 @@
 SRC=profiler.cpp
-AGT=profiler
-AGENT=$AGT.so
+AGT=prof
+AGENT=lib$AGT.so
 BIN=jbprof
 sudo rm -rf $AGENT $BIN log thread.log cpu.log mem.log hs_err* jcmd.log /tmp/perf* /tmp/.java_pid* .attach_pid*  #flame.svg
 sudo kill -9 `pgrep java`
@@ -40,7 +40,9 @@ attach(){
     sleep 1
     pid=`pgrep java`
     OPT=$1
-    sudo ./$BIN $pid $AGT $OPT
+    #export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:`pwd`
+    echo "./$BIN $pid `pwd`/$AGENT $OPT"
+    sudo ./$BIN $pid `pwd`/$AGENT "$OPT"
 }
 run_and_attach(){
     AGT=$1
