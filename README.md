@@ -20,19 +20,19 @@ Features:
 
 2.Thread Sampling: [thread.log](https://github.com/weixingsun/jBProF/blob/master/thread.log)  [root]
 
-    "sample_duration=3;frequency=49;sample_thread=10;log_file=thread.log"
+    "sample_duration=3;frequency=49;sample_thread=4;log_file=thread.log"
     
     pid 	tid 	count	pct 	name
-    8876	8880	8   	0.52	VM Thread
     8876	8879	790 	51.13	ParGC Thread#1
-    8876	8877	5   	0.32	java
     8876	8878	742 	48.03	ParGC Thread#0
+    8876	8880	8   	0.52	VM Thread
+    8876	8877	5   	0.32	java
 
 3.Method Sampling: [method.log](https://github.com/weixingsun/jBProF/blob/master/method.log)  [root]
 
-    "sample_duration=3;sample_top=9;log_file=method.log"
-    "sample_duration=3;sample_top=9;log_file=method.log;monitor_duration=1;count_top=3"
-    "sample_duration=3;sample_top=9;log_file=method.log;monitor_duration=1;lat_top=1"
+    "sample_duration=3;sample_method=9;log_file=method.log"
+    "sample_duration=3;sample_method=9;log_file=method.log;monitor_duration=1;count_top=3"
+    "sample_duration=3;sample_method=9;log_file=method.log;monitor_duration=1;lat_top=1"
     
     Top methods for 3 seconds:
     samples	 method_addr	 method_name
@@ -60,7 +60,7 @@ Features:
 
 4.Memory sampling: [mem.log](https://github.com/weixingsun/jBProF/blob/master/mem.log)
 
-    "sample_duration=3;sample_mem=9;log_file=mem.log;mon_size=1"
+    "sample_duration=3;sample_mem=9;log_file=mem.log;mon_size=99"
     
     6:38:28	 Count 	 Method(Class) 
 	 43 	 java.lang.Integer.toString(byte) 
