@@ -3,7 +3,7 @@
     JVM profiling tool on linux: low overhead, robust, accurate. 
     Consistent with perf top/record
     Automatically resolve symbols
-    Hardware breakpoint based sampling, measuring
+    Hardware breakpoint sampling, counting, timing, and perform rule-based actions dynamically 
 
 Features: 
 
@@ -15,12 +15,12 @@ Features:
 
 1.Flamegraph: [flame.svg](https://github.com/weixingsun/jBProF/blob/master/flame.svg)  [root]
 
-    "sample_duration=3;frequency=49;sample_cpu=cpu.log"
+    "sample_duration=3;frequency=49;log_file=cpu.log"
     ./flamegraph.pl cpu.log > flame.svg
 
 2.Thread Sampling: [thread.log](https://github.com/weixingsun/jBProF/blob/master/thread.log)  [root]
 
-    "sample_duration=3;frequency=49;sample_thread=thread.log"
+    "sample_duration=3;frequency=49;sample_thread=10;log_file=thread.log"
     
     pid 	tid 	count	pct 	name
     8876	8880	8   	0.52	VM Thread
@@ -30,9 +30,9 @@ Features:
 
 3.Method Sampling: [method.log](https://github.com/weixingsun/jBProF/blob/master/method.log)  [root]
 
-    "sample_duration=3;sample_top=9;sample_method=method.log"
-    "sample_duration=3;sample_top=9;sample_method=method.log;monitor_duration=1;count_top=3"
-    "sample_duration=3;sample_top=9;sample_method=method.log;monitor_duration=1;lat_top=1"
+    "sample_duration=3;sample_top=9;log_file=method.log"
+    "sample_duration=3;sample_top=9;log_file=method.log;monitor_duration=1;count_top=3"
+    "sample_duration=3;sample_top=9;log_file=method.log;monitor_duration=1;lat_top=1"
     
     Top methods for 3 seconds:
     samples	 method_addr	 method_name
@@ -60,7 +60,7 @@ Features:
 
 4.Memory sampling: [mem.log](https://github.com/weixingsun/jBProF/blob/master/mem.log)
 
-    "sample_duration=3;sample_top=9;sample_mem=mem.log;mon_size=1"
+    "sample_duration=3;sample_mem=9;log_file=mem.log;mon_size=1"
     
     6:38:28	 Count 	 Method(Class) 
 	 43 	 java.lang.Integer.toString(byte) 
@@ -89,18 +89,18 @@ Features:
 
 5.Tuning: [tune.log](https://github.com/weixingsun/jBProF/blob/master/tune.log)  [root]
 
-     "sample_duration=3;sample_top=9;sample_method=method.log;tune_cfg=tune.cfg;tune_n=3;until=PROF%start"
+     "sample_duration=3;sample_method=9;log_file=method.log;rule_cfg=tune.cfg;action_n=3;start_until=PROF%start"
        
      |***************************************|
         perf map: /tmp/perf-1314.map
         sample_duration=3
-        sample_top=9
-        sample_method=method.log
-        tune: java.util.HashMap.resize	java.util.HashMap$I^DEFAULT_INITIAL_CAPACITY 	x4<1024
-        tune: java.util.ArrayList.grow	java.util.ArrayList$I^DEFAULT_CAPACITY       	x2<2048
-        tune: java.util.HashMap.getNode	java.util.HashMap$F^DEFAULT_LOAD_FACTOR      	-0.05>0.2
-        tune_n=3
-        until=PROF%start
+        sample_method=9
+        log_file=method.log
+        rule: java.util.HashMap.resize	java.util.HashMap$I^DEFAULT_INITIAL_CAPACITY 	x4<1024
+        rule: java.util.ArrayList.grow	java.util.ArrayList$I^DEFAULT_CAPACITY       	x2<2048
+        rule: java.util.HashMap.getNode	java.util.HashMap$F^DEFAULT_LOAD_FACTOR      	-0.05>0.2
+        action_n=3
+        start_until=PROF%start
      |***************************************|
      |************* sleep 0s **************|
      found text=start in PROF
@@ -108,49 +108,18 @@ Features:
      attached fn:do_perf_event_method to pid:1314 perf event 
      BPF sampling 3 seconds
      sampled 329 methods
-     count 	 bp     	 ret    	 addr       	 name
-     138	 7f81277c0910	 7f811054c138	, 7f811054abcf	 Main.count
-     126	 7f81277c0890	 7f811054af54	, 7f8110547ec9	 java.util.HashMap.resize
-     103	 7f81277c0890	 7f811054af54	, 7f8110547e90	 java.util.HashMap.resize
-      60	 7f81277c0890	 7f811054af54	, 7f8110547dcb	 java.util.HashMap.resize
-      54	 7f81277c0910	 7f811054c138	, 7f811054abbf	 Main.count
-      51	 7f81277c0910	 7f811054c138	, 7f811054aceb	 Main.count
-      45	 7f81277c0910	 7f811054c138	, 7f811054a7ca	 Main.count
-      39	 7f81277c0890	 7f811054af54	, 7f8110547e88	 java.util.HashMap.resize
-      38	 7f81277c0910	 7f811054c138	, 7f811054a8c8	 Main.count
-      java/util/HashMap.DEFAULT_INITIAL_CAPACITY: 16 -> 64
+     java/util/HashMap.DEFAULT_INITIAL_CAPACITY: 16 -> 64
        
      Initialized BPF(4)
      attached fn:do_perf_event_method to pid:1314 perf event 
      BPF sampling 3 seconds
      sampled 298 methods
-     count 	 bp     	 ret    	 addr       	 name
-      73	 7f81277c0780	 7f811054af54	, 7f8110547e90	 java.util.HashMap.resize
-      62	 7f81277c0780	 7f811054af54	, 7f8110547ec9	 java.util.HashMap.resize
-      59	 7f81277c0800	 7f811054c138	, 7f811054abcf	 Main.count
-      40	 7f81277c0800	 7f811054c138	, 7f811054abbf	 Main.count
-      34	 7f81277c0780	 7f811054af54	, 7f8110547dcb	 java.util.HashMap.resize
-      33	 7f81277c0800	 7f811054c138	, 7f811054abcd	 Main.count
-      30	 7f81277c0780	 7f811054af54	, 7f8110547e8d	 java.util.HashMap.resize
-      28	 7f81277c0800	 7f811054c138	, 7f811054a8c8	 Main.count
-      28	 7f81277c0800	 7f811054c138	, 7f811054a8e4	 Main.count
      java/util/HashMap.DEFAULT_INITIAL_CAPACITY: 64 -> 256
 
      Initialized BPF(4)
      attached fn:do_perf_event_method to pid:1314 perf event 
      BPF sampling 3 seconds
      sampled 349 methods
-     count 	 bp     	 ret    	 addr       	 name
-     110	 7f68bf916990	 7f68a854f44c	, 7f68a854c84b	 Main.count
-      73	 7f68bf916910	 7f68a854cbd0	, 7f68a85478e3	 java.util.HashMap.resize
-      64	 7f68bf916910	 7f68a854cbd0	, 7f68a8547928	 java.util.HashMap.resize
-      39	 7f68bf916910	 7f68a854cbd0	, 7f68a85478db	 java.util.HashMap.resize
-      36	 7f68bf916990	 7f68a854f44c	, 7f68a854c964	 Main.count
-      30	 7f68bf916990	 7f68a854f44c	, 7f68a854c523	 Main.count
-      29	 7f68bf916990	 7f68a854f44c	, 7f68a854c83b	 Main.count
-      28	 7f68bf916990	 7f68a854f44c	, 7f68a854c542	 Main.count
-      28	 7f68bf916990	 7f68a854f44c	, 7f68a854c638	 Main.count
-      27	 7f68bf916800	 7f68a854ddb8	, 7f68a854c84b	 Main.count
      java/util/HashMap.DEFAULT_INITIAL_CAPACITY: 256 -> 1024
      Done.
     
@@ -161,9 +130,9 @@ Install:
     3.install JDK (OpenJDK 10,11,12,13,14 tested)
     4.run.sh
 
-TODO:
+Todo || Issues:
     
-    1. remove duplicated method entries, currently BCC use IP as method entry.
-    2. add feature to get instance level variable values, like ArrayList.size, HashMap.size
+    1. sometimes there may be duplicated method, it usually caused by JIT recompilation.
+    2. add feature to get instance level variable values, like ArrayList.size, HashMap.size, from JVMTI api
     3. add feature to trigger tuning when a method latency > threshold.
-    4. add feature to tune performance based on PCA.
+    4. add feature to report based factors which selected by PCA.
