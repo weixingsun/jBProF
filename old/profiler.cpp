@@ -25,9 +25,7 @@
 using namespace std;
 
 static bool writing_perf = false;
-static FILE* out_cpu;
-static FILE* out_thread;
-static FILE* out_mem;
+static FILE* out;
 static FILE* out_perf;
 static JNIEnv* jni = NULL;
 static jvmtiEnv* jvmti = NULL;
@@ -455,13 +453,13 @@ void tune(JNIEnv* env, string cls_name, string field_name, string field_type, st
         int v2 = tune_int(v,algo,max);
         set_static_int(env,cls_name,field_name, v2);
         cout<<"Tune: "<<cls_name<<"."<<field_name<<": "<<v<<" -> "<<v2<<endl<<endl;
-        fprintf(out_cpu, "Tune: %s.%s: %d -> %d \n", cls_name.c_str(), field_name.c_str(), v, v2);
+        fprintf(out, "Tune: %s.%s: %d -> %d \n", cls_name.c_str(), field_name.c_str(), v, v2);
     }else if(field_type=="F"){
         float v = get_static_float(env,cls_name,field_name);
         float v2 = tune_float(v,algo,max);
         set_static_float(env,cls_name,field_name,v2);
         cout<<"Tune: "<<cls_name<<"."<<field_name<<": "<<v<<" -> "<<v2<<endl<<endl;
-        fprintf(out_cpu, "Tune: %s.%s: %f -> %f \n", cls_name.c_str(), field_name.c_str(), v, v2);
+        fprintf(out, "Tune: %s.%s: %f -> %f \n", cls_name.c_str(), field_name.c_str(), v, v2);
     }
 }
 void SetupTimer(int duration, int interval, __sighandler_t timer_handler){
@@ -582,25 +580,27 @@ void StopBPF(){
     }
     bpf.detach_perf_event(PERF_TYPE_SOFTWARE, PERF_COUNT_HW_CPU_CYCLES);
 }
-vector<string> PrintThread(){
+vector<string> PrintThread(int N){
     auto table = bpf.get_hash_table<thread_key_t, uint64_t>("counts").get_table_offline();
-    /*
+    
     sort( table.begin(), table.end(),
       [](pair<thread_key_t, uint64_t> a, pair<thread_key_t, uint64_t> b) {
-        return a.second < b.second;
+        return a.second > b.second;
       }
     );
-    */
+    
     //-1 unrunnable, 0 runnable, >0 stopped
     int total_samples = 0;
-    fprintf(out_thread, "pid\ttid\tcount\tpct\tname\n");
+    fprintf(out, "pid\ttid\tcount\tpct\tname\n");
     for (auto it : table) {
 	total_samples+=it.second;
     }
+    int i = 0;
     for (auto it : table) {
-	fprintf(out_thread, "%d\t%d\t%ld\t%0.2f\t%s\n", it.first.pid,it.first.tid,it.second, (float)100*it.second/total_samples, it.first.name );
+        if (++i>N) break;
+	fprintf(out, "%d\t%d\t%ld\t%0.2f\t%s\n", it.first.pid,it.first.tid,it.second, (float)100*it.second/total_samples, it.first.name );
     }
-    fclose(out_thread);
+    fclose(out);
     vector<string> vs;
     return vs;
 }
@@ -614,25 +614,25 @@ void PrintTopMethodCount(method_type methods[], int n){
     //auto cnt = bpf.get_array_table<unsigned long long>("top_counter");
     ebpf::BPFArrayTable<int> cnt = bpf.get_array_table<int>("top_counter");
     ebpf::StatusTuple res(0);
-    fprintf(out_cpu, "Monitoring Methods:\ncount\t method_addr\t method_name\n");
+    fprintf(out, "Monitoring Methods:\ncount\t method_addr\t method_name\n");
     for (int i=0; i<n; i++){
         if (i>n+1) break;
         int value;
         res = cnt.get_value(i, value);
         if (res.code()!=0) cerr<<res.msg()<<endl;
-        else fprintf(out_cpu, "%d\t %lx\t %s\n", value, methods[i].addr, methods[i].name.c_str() );
+        else fprintf(out, "%d\t %lx\t %s\n", value, methods[i].addr, methods[i].name.c_str() );
     }
 }
 void PrintTopMethodRetCount(method_type methods[], int n){
     ebpf::BPFArrayTable<int> cnt = bpf.get_array_table<int>("top_ret_counter");
     ebpf::StatusTuple res(0);
-    fprintf(out_cpu, "Monitoring Methods:\ncount\t method_ret_addr\t method_name\n");
+    fprintf(out, "Monitoring Methods:\ncount\t method_ret_addr\t method_name\n");
     for (int i=0; i<n; i++){
         if (i>n+1) break;
         int value;
         res = cnt.get_value(i, value);
 	if (res.code()!=0) cerr<<res.msg()<<endl;
-	else fprintf(out_cpu, "%d\t %lx\t %s\n", value, methods[i].ret, methods[i].name.c_str() );
+	else fprintf(out, "%d\t %lx\t %s\n", value, methods[i].ret, methods[i].name.c_str() );
     }
 }
 void DetachBreakPoint(struct perf_event_attr* attr){
@@ -670,10 +670,10 @@ void LatencyMethod(method_type method){
         return a.first < b.first;
       }
     );
-    fprintf(out_cpu, "\n(%ld) latency for method: (%lx -> %lx)\t\"%s\"\n", dist.size(), method.addr, method.ret, method.name.c_str() );
-    fprintf(out_cpu, "nsecs    \t count\n"); // distribution\n");
+    fprintf(out, "\n(%ld) latency for method: (%lx -> %lx)\t\"%s\"\n", dist.size(), method.addr, method.ret, method.name.c_str() );
+    fprintf(out, "nsecs    \t count\n"); // distribution\n");
     for (auto it=dist.begin(); it!=dist.end();it++) {
-        fprintf(out_cpu, ">%ld     \t %ld\t \n", (long)exp2(it->first), it->second );
+        fprintf(out, ">%ld     \t %ld\t \n", (long)exp2(it->first), it->second );
     }
     dist.clear();
 }
@@ -712,7 +712,7 @@ vector<string> PrintTopMethods(int N){
         //fprintf(stdout,   "%ld\t %lx\t %lx\t %s\n", it.second, it.first.bp, it.first.ret, method_name.c_str());
         //fprintf(out_cpu, "%ld\t %d\t  %d\t  %lx\t %s\n", it.second, it.first.user_stack_id, it.first.kernel_stack_id, method_addr, method_name.c_str());
     }
-    fprintf(out_cpu, "samples\t method_addr\t method_name\n");
+    fprintf(out, "samples\t method_addr\t method_name\n");
 
     multimap<int, method_type> rmap = flip_map(mout);
     //cout<<"flip method done, printing ("<< rmap.size()<<")"<<endl;
@@ -720,7 +720,7 @@ vector<string> PrintTopMethods(int N){
     method_type methods[N];
     vector<string> vs;
     for (multimap<int,method_type>::const_reverse_iterator it = rmap.rbegin(); it!=rmap.rend(); ++it){
-        fprintf(out_cpu, "%d\t %lx\t %s\n", it->first, it->second.addr, it->second.name.c_str() );
+        fprintf(out, "%d\t %lx\t %s\n", it->first, it->second.addr, it->second.name.c_str() );
         vs.push_back(it->second.name);
         if (i<N) methods[i++]=it->second;
     }
@@ -735,7 +735,7 @@ vector<string> PrintTopMethods(int N){
             LatencyMethod(methods[i]);
         }
     }
-    fflush(out_cpu);
+    fflush(out);
     t.clear_table_non_atomic();
     return vs;
 }
@@ -764,18 +764,18 @@ vector<string> PrintFlame(){
                 stack_traces.push(sym);
             }
         }
-        //fprintf(out_cpu, "%s;", string(it.first.name).c_str());
-        fprintf(out_cpu, "%s;", it.first.name);
+        //fprintf(out, "%s;", string(it.first.name).c_str());
+        fprintf(out, "%s;", it.first.name);
         while (!stack_traces.empty()){
-            fprintf(out_cpu, "%s", stack_traces.top().c_str());
+            fprintf(out, "%s", stack_traces.top().c_str());
             stack_traces.pop();
             if (!stack_traces.empty()){
-                fprintf(out_cpu, ";");
+                fprintf(out, ";");
             }
         }
-        fprintf(out_cpu, "      %ld\n", it.second);
+        fprintf(out, "      %ld\n", it.second);
     }
-    fclose(out_cpu);
+    fclose(out);
     vector<string> vs;
     return vs;
 }
@@ -784,7 +784,7 @@ vector<string> PrintBPF(unsigned long id){
     vector<string> vs;
     switch((int)log2(id)){
         case 0: return PrintFlame();
-        case 1: return PrintThread();
+        case 1: return PrintThread(SAMPLE_TOP_N);
         case 2: return PrintTopMethods(SAMPLE_TOP_N);
     }
     return vs;
@@ -867,7 +867,7 @@ void read_cfg(string filename){
     while(getline(in,str)){
         if(str.size()>0) {
             TUNE_CLASS.push_back(str);
-            cout<<"tune: "<<str<<endl;
+            cout<<"rule: "<<str<<endl;
         }
     }
     in.close();
@@ -879,39 +879,37 @@ int do_single_options(string k, string v){
         MON_DURATION=stoi(v);
     }else if(k.compare("frequency")==0){
         BPF_PERF_FREQ=stoi(v);
-    }else if(k.compare("sample_top")==0){
-        SAMPLE_TOP_N=stoi(v);
+    }else if(k.compare("log_file")==0){
+        out = fopen(v.c_str(), "w");
     }else if(k.compare("flame")==0){         // 0000 0001
         gen_perf_file();
-        out_cpu = fopen(v.c_str(), "w");
+        out = fopen(v.c_str(), "w");
         return 1;
     }else if(k.compare("sample_thread")==0){ // 0000 0010
-        out_thread = fopen(v.c_str(), "w");
+        SAMPLE_TOP_N=stoi(v);
         return 2;
     }else if(k.compare("sample_method")==0){ // 0000 0100
+        SAMPLE_TOP_N=stoi(v);
         gen_perf_file();
-        out_cpu = fopen(v.c_str(), "w");
         return 4;
     }else if(k.compare("lat_top")==0){
         LAT_TOP_N=stoi(v);
     }else if(k.compare("count_top")==0){
         COUNT_TOP_N=stoi(v);
-    }else if(k.compare("tune_cfg")==0){
+    }else if(k.compare("rule_cfg")==0){
         read_cfg(v);
-    }else if(k.compare("tune_n")==0){
+    }else if(k.compare("action_n")==0){
         TUNING_N=stoi(v);
     }else if(k.compare("wait")==0){
         WAIT=stoi(v);
-    }else if(k.compare("until")==0){
+    }else if(k.compare("start_until")==0){
         UNTIL=false;
 	UNTIL_TEXT=v;
     }
     return -1;
 }
 void InitFile() {
-    out_mem = stderr;
-    out_cpu = stdout;
-    out_thread = stdout;
+    out = stdout;
     string pid = to_string(getpid());
     string path = "/tmp/perf-"+pid+".map";
     cout << "perf map: "<< path<< endl;
@@ -1018,9 +1016,7 @@ JNIEXPORT jint JNICALL Agent_OnLoad(JavaVM* vm, char* options, void* reserved) {
     return 0;
 }
 void closeAllFiles() {
-    fclose(out_mem);
-    fclose(out_cpu);
-    fclose(out_thread);
+    fclose(out);
     fclose(out_perf);
 }
 JNIEXPORT void JNICALL Agent_OnUnload(JavaVM *vm){

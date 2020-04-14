@@ -71,20 +71,24 @@ if [ $? = 0 ]; then
     #./flamegraph.pl cpu.log > flame.svg
     ###########run_with_agent $AGENT "sample_duration=5;sample_mem=mem.log"
 
-    #run_and_attach $AGENT "sample_duration=5;frequency=49;sample_thread=thread.log"
+    #run_and_attach $AGENT "sample_duration=5;frequency=49;sample_thread=4;log_file=thread.log"
 
-    #run_and_attach $AGENT "sample_duration=3;sample_top=9;sample_method=method.log"
+    #run_and_attach $AGENT "sample_duration=3;sample_method=9;log_file=method.log"
 
-    #run_and_attach $AGENT "sample_duration=3;sample_top=9;sample_method=method.log;monitor_duration=1;count_top=1"
-    #run_and_attach $AGENT "sample_duration=5;sample_top=9;sample_method=method.log;monitor_duration=1;lat_top=2"
+    #run_and_attach $AGENT "sample_duration=3;sample_method=9;log_file=method.log;monitor_duration=1;count_top=1"
+    #run_and_attach $AGENT "sample_duration=5;sample_method=9;log_file=method.log;monitor_duration=1;lat_top=2"
 
-    #run_with_agent $AGENT "sample_duration=10;sample_mem=mem.log;count_alloc=1"
-    #run_with_agent $AGENT "sample_duration=10;sample_mem=mem.log;mon_size=1"
+    #run_with_agent $AGENT "sample_duration=10;sample_mem=9;log_file=mem.log;count_alloc=1"
+    #run_with_agent $AGENT "sample_duration=10;sample_mem=9;log_file=mem.log;mon_size=1"
 
-    #run_and_attach $AGENT "sample_duration=3;sample_top=9;sample_method=method.log;tune_cfg=tune.cfg;wait=1"
-    #run_and_attach $AGENT "sample_duration=3;sample_top=9;sample_method=method.log;tune_cfg=tune.cfg;tune_n=3;until=.PROF%start"
+    #run_and_attach $AGENT "sample_duration=3;sample_method=9;log_file=method.log;rule_cfg=tune.cfg;wait=1"
+    #run_and_attach $AGENT "sample_duration=3;sample_method=9;log_file=method.log;rule_cfg=tune.cfg;action_n=3;start_until=.PROF%start"
 
-    attach "sample_duration=3;sample_top=9;sample_method=method.log;tune_cfg=tune.cfg;tune_n=10;until=.PROF%start"
+    attach "sample_duration=3;sample_method=9;log_file=method.log;rule_cfg=tune.cfg;action_n=3;start_until=.PROF%start"
+
+
+
+
 
     #run_with_agent $AGENT "sample_duration=5;sample_top=9;sample_method=method.log;tune_fields=tune.cfg"
     #echo "rule : when HashMap.resize  -> + initial_capacity"
