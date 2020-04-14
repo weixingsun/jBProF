@@ -3,7 +3,7 @@
     JVM profiling tool on linux: low overhead, robust, accurate. 
     Consistent with perf top/record
     Automatically resolve symbols
-    Hardware breakpoint based sampling, measuring
+    Hardware breakpoint sampling, counting, timing, and perform rule-based actions dynamically 
 
 Features: 
 
