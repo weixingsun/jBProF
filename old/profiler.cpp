@@ -429,10 +429,10 @@ float tune_float(float v, string algo, string max){
     algo.erase(0,1);
     float av = stof(algo);
     switch(s){
-        case '*': return (v<MAX?v*av:MAX);
-        case '/': return (v>MAX?v/av:MAX);
-        case '+': return (v<MAX?v+av:MAX);
-        case '-': return (v>MAX?v-av:MAX);
+        case '*': return (v*av<MAX?v*av:MAX);
+        case '/': return (v/av>MAX?v/av:MAX);
+        case '+': return (v+av<MAX?v+av:MAX);
+        case '-': return (v-av>MAX?v-av:MAX);
     }
     return 0;
 }
@@ -442,10 +442,10 @@ int tune_int(int v, string algo, string max){
     algo.erase(0,1);
     int av = stoi(algo);
     switch(s){
-        case '*': return (v<MAX?v*av:MAX);
-        case '/': return (v>MAX?v/av:MAX);
-        case '+': return (v<MAX?v+av:MAX);
-        case '-': return (v>MAX?v-av:MAX);
+        case '*': return (v*av<MAX?v*av:MAX);
+        case '/': return (v/av>MAX?v/av:MAX);
+        case '+': return (v+av<MAX?v+av:MAX);
+        case '-': return (v-av>MAX?v-av:MAX);
     }
     return 0;
 }
@@ -455,11 +455,13 @@ void tune(JNIEnv* env, string cls_name, string field_name, string field_type, st
         int v2 = tune_int(v,algo,max);
         set_static_int(env,cls_name,field_name, v2);
         cout<<"Tune: "<<cls_name<<"."<<field_name<<": "<<v<<" -> "<<v2<<endl<<endl;
+        fprintf(out_cpu, "Tune: %s.%s: %d -> %d \n", cls_name.c_str(), field_name.c_str(), v, v2);
     }else if(field_type=="F"){
         float v = get_static_float(env,cls_name,field_name);
         float v2 = tune_float(v,algo,max);
         set_static_float(env,cls_name,field_name,v2);
         cout<<"Tune: "<<cls_name<<"."<<field_name<<": "<<v<<" -> "<<v2<<endl<<endl;
+        fprintf(out_cpu, "Tune: %s.%s: %f -> %f \n", cls_name.c_str(), field_name.c_str(), v, v2);
     }
 }
 void SetupTimer(int duration, int interval, __sighandler_t timer_handler){
@@ -686,19 +688,20 @@ vector<string> PrintTopMethods(int N){
         return a.second > b.second;
       }
     );
-    fprintf(stdout, "count \t bp     \t ret    \t addr       \t name\n");
+    //fprintf(stdout, "count \t bp     \t ret    \t addr       \t name\n");
     map<method_type, int> mout;		//addr ret name  count
     for (auto it : table) {
-        uint64_t method_addr;
+        //uint64_t method_addr;
         string   method_name;
         if (it.first.kernel_stack_id >= 0) {
-            method_addr = *stacks.get_stack_addr(it.first.kernel_stack_id).begin();
+            //method_addr = *stacks.get_stack_addr(it.first.kernel_stack_id).begin();
             method_name = *stacks.get_stack_symbol(it.first.kernel_stack_id, -1).begin()+"[k]";
         }else if(it.first.user_stack_id >= 0) {
-            method_addr = *stacks.get_stack_addr(it.first.user_stack_id).begin();
+            //method_addr = *stacks.get_stack_addr(it.first.user_stack_id).begin();
             method_name = *stacks.get_stack_symbol(it.first.user_stack_id, it.first.pid).begin();
         }
-        struct method_type method = {.addr=method_addr, .ret=it.first.ret, .name=method_name};
+        //struct method_type method = {.addr=method_addr, .ret=it.first.ret, .name=method_name};
+        struct method_type method = {.addr=it.first.bp, .ret=it.first.ret, .name=method_name};
         auto p = mout.find(method);   // use method_name to remove duplicated rows
         if ( p==mout.end() ){
             mout.insert(pair<method_type,int>(method, (int)it.second));
@@ -706,7 +709,7 @@ vector<string> PrintTopMethods(int N){
             (*p).second += it.second;    //merge_method from different callers
         }
         if( mout.size() >N ) break;
-        fprintf(stdout,   "%ld\t %lx\t %lx\t, %lx\t %s\n", it.second, it.first.bp, it.first.ret, method_addr, method_name.c_str());
+        //fprintf(stdout,   "%ld\t %lx\t %lx\t %s\n", it.second, it.first.bp, it.first.ret, method_name.c_str());
         //fprintf(out_cpu, "%ld\t %d\t  %d\t  %lx\t %s\n", it.second, it.first.user_stack_id, it.first.kernel_stack_id, method_addr, method_name.c_str());
     }
     fprintf(out_cpu, "samples\t method_addr\t method_name\n");

@@ -84,8 +84,7 @@ if [ $? = 0 ]; then
     #run_and_attach $AGENT "sample_duration=3;sample_top=9;sample_method=method.log;tune_cfg=tune.cfg;wait=1"
     #run_and_attach $AGENT "sample_duration=3;sample_top=9;sample_method=method.log;tune_cfg=tune.cfg;tune_n=3;until=.PROF%start"
 
-    #attach "sample_duration=3;sample_top=9;sample_method=method.log;tune_cfg=tune.cfg;tune_n=3;until=.PROF%start"
-    attach "sample_duration=3;sample_top=9;sample_method=method.log"
+    attach "sample_duration=3;sample_top=9;sample_method=method.log;tune_cfg=tune.cfg;tune_n=10;until=.PROF%start"
 
     #run_with_agent $AGENT "sample_duration=5;sample_top=9;sample_method=method.log;tune_fields=tune.cfg"
     #echo "rule : when HashMap.resize  -> + initial_capacity"
