@@ -15,12 +15,12 @@ Features:
 
 1.Flamegraph: [flame.svg](https://github.com/weixingsun/jBProF/blob/master/flame.svg)  [root]
 
-    "sample_duration=3;frequency=49;sample_cpu=cpu.log"
+    "sample_duration=3;frequency=49;log_file=cpu.log"
     ./flamegraph.pl cpu.log > flame.svg
 
 2.Thread Sampling: [thread.log](https://github.com/weixingsun/jBProF/blob/master/thread.log)  [root]
 
-    "sample_duration=3;frequency=49;sample_thread=thread.log"
+    "sample_duration=3;frequency=49;sample_thread=10;log_file=thread.log"
     
     pid 	tid 	count	pct 	name
     8876	8880	8   	0.52	VM Thread
@@ -30,9 +30,9 @@ Features:
 
 3.Method Sampling: [method.log](https://github.com/weixingsun/jBProF/blob/master/method.log)  [root]
 
-    "sample_duration=3;sample_top=9;sample_method=method.log"
-    "sample_duration=3;sample_top=9;sample_method=method.log;monitor_duration=1;count_top=3"
-    "sample_duration=3;sample_top=9;sample_method=method.log;monitor_duration=1;lat_top=1"
+    "sample_duration=3;sample_top=9;log_file=method.log"
+    "sample_duration=3;sample_top=9;log_file=method.log;monitor_duration=1;count_top=3"
+    "sample_duration=3;sample_top=9;log_file=method.log;monitor_duration=1;lat_top=1"
     
     Top methods for 3 seconds:
     samples	 method_addr	 method_name
@@ -60,7 +60,7 @@ Features:
 
 4.Memory sampling: [mem.log](https://github.com/weixingsun/jBProF/blob/master/mem.log)
 
-    "sample_duration=3;sample_top=9;sample_mem=mem.log;mon_size=1"
+    "sample_duration=3;sample_mem=9;log_file=mem.log;mon_size=1"
     
     6:38:28	 Count 	 Method(Class) 
 	 43 	 java.lang.Integer.toString(byte) 
