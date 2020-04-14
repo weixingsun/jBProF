@@ -89,18 +89,18 @@ Features:
 
 5.Tuning: [tune.log](https://github.com/weixingsun/jBProF/blob/master/tune.log)  [root]
 
-     "sample_duration=3;sample_top=9;sample_method=method.log;tune_cfg=tune.cfg;tune_n=3;until=PROF%start"
+     "sample_duration=3;sample_method=9;log_file=method.log;rule_cfg=tune.cfg;action_n=3;start_until=PROF%start"
        
      |***************************************|
         perf map: /tmp/perf-1314.map
         sample_duration=3
-        sample_top=9
-        sample_method=method.log
-        tune: java.util.HashMap.resize	java.util.HashMap$I^DEFAULT_INITIAL_CAPACITY 	x4<1024
-        tune: java.util.ArrayList.grow	java.util.ArrayList$I^DEFAULT_CAPACITY       	x2<2048
-        tune: java.util.HashMap.getNode	java.util.HashMap$F^DEFAULT_LOAD_FACTOR      	-0.05>0.2
-        tune_n=3
-        until=PROF%start
+        sample_method=9
+        log_file=method.log
+        rule: java.util.HashMap.resize	java.util.HashMap$I^DEFAULT_INITIAL_CAPACITY 	x4<1024
+        rule: java.util.ArrayList.grow	java.util.ArrayList$I^DEFAULT_CAPACITY       	x2<2048
+        rule: java.util.HashMap.getNode	java.util.HashMap$F^DEFAULT_LOAD_FACTOR      	-0.05>0.2
+        action_n=3
+        start_until=PROF%start
      |***************************************|
      |************* sleep 0s **************|
      found text=start in PROF
