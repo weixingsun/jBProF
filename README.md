@@ -135,4 +135,4 @@ Todo || Issues:
     1. sometimes there may be duplicated method, it usually caused by JIT recompilation.
     2. add feature to get instance level variable values, like ArrayList.size, HashMap.size, from JVMTI api
     3. add feature to trigger tuning when a method latency > threshold.
-    4. add feature to report based factors which selected by PCA.
+    4. add feature to report on factors which selected by PCA.
