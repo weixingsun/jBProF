@@ -17,6 +17,7 @@
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <unistd.h>
+#include <thread>
 #include <BPF.h>
 #include <jvmti.h>
 #include <linux/perf_event.h>
@@ -983,6 +984,21 @@ void wait_until(string UNTIL_TEXT){
         }
     }
 }
+
+void profile(){
+    cout << "|************* sleep "<<WAIT<<"s **************|"<< endl;
+    sleep(WAIT);
+    wait_until(UNTIL_TEXT);
+    for (int i=0;i<TUNING_N;i++){
+        StartBPF(id);
+        StopBPF();
+        vector<string> results = PrintBPF(id);
+        //print_vector(results);
+        tune_all_fields(TUNE_CLASS, results);
+    }
+    cout << "Done."<< endl;
+    return 0;
+}
 JNIEXPORT jint JNICALL Agent_OnLoad(JavaVM* vm, char* options, void* reserved) {
     cout << "|***************************************|"<< endl;
     InitFile();
@@ -1001,20 +1017,10 @@ JNIEXPORT jint JNICALL Agent_OnLoad(JavaVM* vm, char* options, void* reserved) {
         }
     }
     cout << "|***************************************|"<< endl;
-
-    cout << "|************* sleep "<<WAIT<<"s **************|"<< endl;
-    sleep(WAIT);
-    wait_until(UNTIL_TEXT);
-    for (int i=0;i<TUNING_N;i++){
-        StartBPF(id);
-        StopBPF();
-        vector<string> results = PrintBPF(id);
-        //print_vector(results);
-        tune_all_fields(TUNE_CLASS, results);
-    }
-    cout << "Done."<< endl;
-    return 0;
+    thread p = thread(profile);
+    p.join();
 }
+
 void closeAllFiles() {
     fclose(out);
     fclose(out_perf);
