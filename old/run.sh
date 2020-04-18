@@ -21,7 +21,7 @@ cpp_build(){
   JAVA_INC="-I$JAVA_HOME/include -I$JAVA_HOME/include/$OS"
   #export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/lib/
   #export LIBRARY_PATH=$LIBRARY_PATH:/usr/local/lib/
-  LIB="-lbcc"
+  LIB="-lbcc -lpthread"
   #LIB="-shared -lbcc -lstdc++ "
   OPTS="-O3 -fPIC -shared $JAVA_INC $BCC_INC $LIB"
   echo "$CPP $SRC $OPTS -o $AGENT"
@@ -44,29 +44,26 @@ attach(){
     echo "./$BIN $pid `pwd`/$AGENT $OPT"
     sudo ./$BIN $pid `pwd`/$AGENT "$OPT"
 }
-run_and_attach(){
-    AGT=$1
-    OPT=$2
+jcmd_attach(){
+    OPT=$1
     time $JAVA_HOME/bin/java $JIT Main $LOOP &
     sleep 1
     pid=`pgrep java`
     #/usr/share/bcc/tools/tplist -p $pid
-    echo "$JAVA_HOME/bin/jcmd $pid JVMTI.agent_load ./$AGT $OPT"
-    sudo  $JAVA_HOME/bin/jcmd $pid JVMTI.agent_load ./$AGT "\"$OPT\"" > jcmd.log 2>&1
+    echo "$JAVA_HOME/bin/jcmd $pid JVMTI.agent_load ./$AGENT $OPT"
+    sudo  $JAVA_HOME/bin/jcmd $pid JVMTI.agent_load ./$AGENT "\"$OPT\""
     #python method.py -F 99 -p $pid -f 3 > profile.out
 }
 
 run_with_agent(){
-    AGT=$1
-    OPT=$2
+    OPT=$1
     #-XX:+EnableJVMCI -XX:+UseJVMCICompiler -XX:-TieredCompilation -XX:+PrintCompilation -XX:+UnlockExperimentalVMOptions 
-    echo "$JAVA_HOME/bin/java $JIT -agentpath:./$AGT=$OPT Main $LOOP"
-    time $JAVA_HOME/bin/java $JIT -agentpath:./$AGT=$OPT Main $LOOP 
+    echo "$JAVA_HOME/bin/java $JIT -agentpath:`pwd`/$AGENT=$OPT Main $LOOP"
+    time $JAVA_HOME/bin/java $JIT -agentpath:`pwd`/$AGENT=$OPT Main $LOOP 
 }
 #java_build
 cpp_build
 if [ $? = 0 ]; then
-    cp $AGENT lib/
     #run_and_attach $AGENT "sample_duration=5;frequency=49;flame=cpu.log"
     #./flamegraph.pl cpu.log > flame.svg
     ###########run_with_agent $AGENT "sample_duration=5;sample_mem=mem.log"
@@ -82,15 +79,11 @@ if [ $? = 0 ]; then
     #run_with_agent $AGENT "sample_duration=10;sample_mem=9;log_file=mem.log;mon_size=1"
 
     #run_and_attach $AGENT "sample_duration=3;sample_method=9;log_file=method.log;rule_cfg=tune.cfg;wait=1"
-    #run_and_attach $AGENT "sample_duration=3;sample_method=9;log_file=method.log;rule_cfg=tune.cfg;action_n=3;start_until=.PROF%start"
+    jcmd_attach "sample_duration=3;sample_method=9;log_file=method.log;method_rules=tune.cfg;action_n=3;start_until=.PROF%start"
 
-    attach "sample_duration=3;sample_method=9;log_file=method.log;rule_cfg=tune.cfg;action_n=3;start_until=.PROF%start"
+    #    attach "sample_duration=3;sample_method=9;log_file=method.log;method_rules=tune.cfg;action_n=3;start_until=.PROF%start"
 
-
-
-
-
-    #run_with_agent $AGENT "sample_duration=5;sample_top=9;sample_method=method.log;tune_fields=tune.cfg"
+    #run_with_agent "sample_duration=5;sample_method=9;log_file=method.log;wait=2" #;method_rules=tune.cfg;action_n=2
     #echo "rule : when HashMap.resize  -> + initial_capacity"
     #echo "rule :      HashMap.getNode -> - loadFactor "
 

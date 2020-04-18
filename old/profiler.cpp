@@ -25,6 +25,8 @@
 
 using namespace std;
 
+static bool ATTACH = false;
+static int  PID = -1;
 static bool writing_perf = false;
 static FILE* out;
 static FILE* out_perf;
@@ -548,12 +550,11 @@ perf_event_attr AttachBreakPoint(uint64_t addr, const string& fn, int seq){
 }
 
 void StartBPF(unsigned long id) {
-    int pid = getpid();
     if (!BPF_INIT){
         cout << "Start BPF(" << id << ")" << endl;
-        const string PID = "(tgid=="+to_string(pid)+")";
+        const string spid = "(tgid=="+to_string(PID)+")";
         string BPF_TXT = get_bpf_text(id);
-        str_replace(BPF_TXT, "PID", PID);
+        str_replace(BPF_TXT, "PID", spid);
         //cout << "BPF:" << endl << BPF_TXT << endl;
         auto init_r = bpf.init(BPF_TXT);
         if (init_r.code() != 0)  cerr << init_r.msg() << endl;
@@ -565,9 +566,9 @@ void StartBPF(unsigned long id) {
     string fn = get_prof_func(id);
     auto att_r = bpf.attach_perf_event(PERF_TYPE_SOFTWARE, PERF_COUNT_HW_CPU_CYCLES, fn, BPF_PERF_FREQ, 0, pid2);
     if (att_r.code() != 0) {
-        cerr << "failed to attach fn:" << fn <<  " pid:" << pid << " err:" << att_r.msg() << endl;
+        cerr << "failed to attach fn:" << fn <<  " pid:" << PID << " err:" << att_r.msg() << endl;
     }else{
-        cout << "attached fn:"<<fn <<" to pid:" << pid << " perf event "<< endl;
+        cout << "attached fn:"<<fn <<" to pid:" << PID << " perf event "<< endl;
     }
     cout << "BPF sampling " << DURATION << " seconds" << endl;
 }
@@ -897,7 +898,7 @@ int do_single_options(string k, string v){
         LAT_TOP_N=stoi(v);
     }else if(k.compare("count_top")==0){
         COUNT_TOP_N=stoi(v);
-    }else if(k.compare("rule_cfg")==0){
+    }else if(k.compare("method_rules")==0){
         read_cfg(v);
     }else if(k.compare("action_n")==0){
         TUNING_N=stoi(v);
@@ -911,8 +912,8 @@ int do_single_options(string k, string v){
 }
 void InitFile() {
     out = stdout;
-    string pid = to_string(getpid());
-    string path = "/tmp/perf-"+pid+".map";
+    string spid = to_string(PID);
+    string path = "/tmp/perf-"+spid+".map";
     cout << "perf map: "<< path<< endl;
     out_perf = fopen(path.c_str(),"w");
 }
@@ -984,10 +985,7 @@ void wait_until(string UNTIL_TEXT){
         }
     }
 }
-
-void profile(){
-    cout << "|************* sleep "<<WAIT<<"s **************|"<< endl;
-    sleep(WAIT);
+void profile(int id){
     wait_until(UNTIL_TEXT);
     for (int i=0;i<TUNING_N;i++){
         StartBPF(id);
@@ -996,13 +994,12 @@ void profile(){
         //print_vector(results);
         tune_all_fields(TUNE_CLASS, results);
     }
-    cout << "Done."<< endl;
-    return 0;
 }
 JNIEXPORT jint JNICALL Agent_OnLoad(JavaVM* vm, char* options, void* reserved) {
     cout << "|***************************************|"<< endl;
     InitFile();
     gen_bpf_map();
+    PID = getpid();
     vm->GetEnv((void**) &jvmti, JVMTI_VERSION_1_0);
     jvmti->CreateRawMonitor("tree_lock", &tree_lock);
     int id = -1;
@@ -1016,11 +1013,18 @@ JNIEXPORT jint JNICALL Agent_OnLoad(JavaVM* vm, char* options, void* reserved) {
             if (i>-1) id=i;
         }
     }
-    cout << "|***************************************|"<< endl;
-    thread p = thread(profile);
-    p.join();
+    cout << "|************* sleep "<<WAIT<<"s **************|"<< endl;
+    sleep(WAIT);
+    if(ATTACH){
+        cout<<"Attach Mode: "<<endl;
+        profile(id);
+    }else{
+        thread p = thread(profile,id);
+        p.detach();
+    }
+    cout << "Main JVMTI Done."<< endl;
+    return 0;
 }
-
 void closeAllFiles() {
     fclose(out);
     fclose(out_perf);
@@ -1031,9 +1035,8 @@ JNIEXPORT void JNICALL Agent_OnUnload(JavaVM *vm){
     closeAllFiles();
 }
 JNIEXPORT jint JNICALL Agent_OnAttach(JavaVM* vm, char* options, void* reserved) {
-    if (jvmti != NULL) {
-        return 0;
-    }
+    if (jvmti != NULL) return 0;
+    ATTACH = true;
     return Agent_OnLoad(vm, options, reserved);
 }
 
@@ -1161,3 +1164,4 @@ int main(int argc, char* argv[]) {
 
     return result;
 }
+
