@@ -985,6 +985,15 @@ void wait_until(string UNTIL_TEXT){
         }
     }
 }
+void getJNI(JavaVM* vm){
+#ifdef ANDROID
+    vm->AttachCurrentThread(&jni, 0);
+#else
+    vm->AttachCurrentThread(reinterpret_cast<void**>(&jni), 0);
+#endif
+    //jniEnv->CallVoidMethod(jObj, jmdOnPrepared);
+    //javaVM->DetachCurrentThread();
+}
 void profile(int id){
     wait_until(UNTIL_TEXT);
     for (int i=0;i<TUNING_N;i++){
@@ -997,9 +1006,9 @@ void profile(int id){
 }
 JNIEXPORT jint JNICALL Agent_OnLoad(JavaVM* vm, char* options, void* reserved) {
     cout << "|***************************************|"<< endl;
+    PID = getpid();
     InitFile();
     gen_bpf_map();
-    PID = getpid();
     vm->GetEnv((void**) &jvmti, JVMTI_VERSION_1_0);
     jvmti->CreateRawMonitor("tree_lock", &tree_lock);
     int id = -1;
@@ -1019,6 +1028,8 @@ JNIEXPORT jint JNICALL Agent_OnLoad(JavaVM* vm, char* options, void* reserved) {
         cout<<"Attach Mode: "<<endl;
         profile(id);
     }else{
+        cout<<"Agent Mode: "<<endl;
+        //profile(id);
         thread p = thread(profile,id);
         p.detach();
     }

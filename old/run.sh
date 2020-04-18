@@ -58,32 +58,29 @@ jcmd_attach(){
 run_with_agent(){
     OPT=$1
     #-XX:+EnableJVMCI -XX:+UseJVMCICompiler -XX:-TieredCompilation -XX:+PrintCompilation -XX:+UnlockExperimentalVMOptions 
-    echo "$JAVA_HOME/bin/java $JIT -agentpath:`pwd`/$AGENT=$OPT Main $LOOP"
+    echo "$JAVA_HOME/bin/java $JIT -agentpath:`pwd`/$AGENT=\"$OPT\" Main $LOOP"
     time $JAVA_HOME/bin/java $JIT -agentpath:`pwd`/$AGENT=$OPT Main $LOOP 
 }
 #java_build
 cpp_build
 if [ $? = 0 ]; then
-    #run_and_attach $AGENT "sample_duration=5;frequency=49;flame=cpu.log"
+    #    attach "sample_duration=3;sample_method=9;log_file=method.log;method_rules=tune.cfg;action_n=3;start_until=.PROF%start"
+    #jcmd_attach "sample_duration=5;frequency=49;flame=cpu.log"
     #./flamegraph.pl cpu.log > flame.svg
-    ###########run_with_agent $AGENT "sample_duration=5;sample_mem=mem.log"
 
-    #run_and_attach $AGENT "sample_duration=5;frequency=49;sample_thread=4;log_file=thread.log"
+    #jcmd_attach "sample_duration=5;frequency=49;sample_thread=4;log_file=thread.log"
+    #jcmd_attach "sample_duration=3;sample_method=9;log_file=method.log"
 
-    #run_and_attach $AGENT "sample_duration=3;sample_method=9;log_file=method.log"
+    #jcmd_attach "sample_duration=3;sample_method=9;log_file=method.log;monitor_duration=1;count_top=1"
+    #jcmd_attach "sample_duration=5;sample_method=9;log_file=method.log;monitor_duration=1;lat_top=2"
 
-    #run_and_attach $AGENT "sample_duration=3;sample_method=9;log_file=method.log;monitor_duration=1;count_top=1"
-    #run_and_attach $AGENT "sample_duration=5;sample_method=9;log_file=method.log;monitor_duration=1;lat_top=2"
+    #jcmd_attach "sample_duration=3;sample_method=9;log_file=method.log;rule_cfg=tune.cfg;wait=1"
+    #jcmd_attach "sample_duration=3;sample_method=9;log_file=method.log;method_rules=tune.cfg;action_n=3;start_until=.PROF%start"
 
+    run_with_agent "sample_duration=5;sample_method=9" #;log_file=method.log;wait=8;method_rules=tune.cfg;action_n=2
     #run_with_agent $AGENT "sample_duration=10;sample_mem=9;log_file=mem.log;count_alloc=1"
     #run_with_agent $AGENT "sample_duration=10;sample_mem=9;log_file=mem.log;mon_size=1"
 
-    #run_and_attach $AGENT "sample_duration=3;sample_method=9;log_file=method.log;rule_cfg=tune.cfg;wait=1"
-    jcmd_attach "sample_duration=3;sample_method=9;log_file=method.log;method_rules=tune.cfg;action_n=3;start_until=.PROF%start"
-
-    #    attach "sample_duration=3;sample_method=9;log_file=method.log;method_rules=tune.cfg;action_n=3;start_until=.PROF%start"
-
-    #run_with_agent "sample_duration=5;sample_method=9;log_file=method.log;wait=2" #;method_rules=tune.cfg;action_n=2
     #echo "rule : when HashMap.resize  -> + initial_capacity"
     #echo "rule :      HashMap.getNode -> - loadFactor "
 
