@@ -76,6 +76,7 @@ struct method_key_t {
   int user_stack_id;
   int kernel_stack_id;
   uint64_t bp;
+  //uint64_t offset;
   uint64_t ret;
 };
 //for method latency
@@ -179,6 +180,7 @@ struct method_key_t {
     int user_stack_id;
     int kernel_stack_id;
     u64 bp;
+    //u64 offset;
     u64 ret;
 };
 typedef struct hist_key {
@@ -247,13 +249,12 @@ int do_perf_event_method(struct bpf_perf_event_data *ctx) {
     struct method_key_t key = {.pid = tgid};
     //key.bp = regs->bp;
     //key.ret = regs->r14;
-    u64 ret = regs->bp+8;
-    bpf_probe_read(&key.ret, sizeof(u64), (void *)ret);
-    u64 offset = 0;
-    int* off = 0;
-    bpf_probe_read(&off, sizeof(u32), (void *)ret-1);
-    bpf_probe_read(&offset, sizeof(u64), (void *)off);
-    key.bp = ret+offset;
+    u64 p_ret = regs->bp+8;
+    bpf_probe_read(&key.ret, sizeof(u64), (void *)p_ret);
+    //u64 offset = 0;
+    u32 offset = 0;
+    bpf_probe_read(&offset, sizeof(offset), (void *)(key.ret-4) );
+    key.bp = key.ret + (int)offset;
     key.user_stack_id = stack_traces.get_stackid(&ctx->regs, BPF_F_USER_STACK);
     key.kernel_stack_id = stack_traces.get_stackid(&ctx->regs, 0);
     if (key.kernel_stack_id >= 0) {
@@ -672,6 +673,7 @@ void LatencyMethod(method_type method){
     DetachBreakPoint(&peas[0]);
     DetachBreakPoint(&peas[1]);
     auto dist = bpf.get_hash_table<uint64_t, uint64_t>("dist").get_table_offline();
+    cout<<"method latency measured in "<<dist.size() << " scales"<<endl;
     sort( dist.begin(), dist.end(),
       [](pair<uint64_t, uint64_t> a, pair<uint64_t, uint64_t> b) {
         return a.first < b.first;
@@ -695,7 +697,7 @@ vector<string> PrintTopMethods(int N){
         return a.second > b.second;
       }
     );
-    //fprintf(stdout, "count \t bp     \t ret    \t addr       \t name\n");
+    fprintf(stdout, "count \t entry   \t ret   \t name\n");
     map<method_type, int> mout;		//addr ret name  count
     for (auto it : table) {
         //uint64_t method_addr;
@@ -716,7 +718,7 @@ vector<string> PrintTopMethods(int N){
             (*p).second += it.second;    //merge_method from different callers
         }
         if( mout.size() >N ) break;
-        //fprintf(stdout,   "%ld\t %lx\t %lx\t %s\n", it.second, it.first.bp, it.first.ret, method_name.c_str());
+        //fprintf(stdout,   "%ld\t %lx\t %lx\t %lx\t %s\n", it.second, it.first.bp, it.first.offset, it.first.ret, method_name.c_str());
         //fprintf(out_cpu, "%ld\t %d\t  %d\t  %lx\t %s\n", it.second, it.first.user_stack_id, it.first.kernel_stack_id, method_addr, method_name.c_str());
     }
     fprintf(out, "samples\t method_addr\t method_name\n");
