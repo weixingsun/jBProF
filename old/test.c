@@ -17,7 +17,6 @@ main.fa.ret: 0x104d17eb8
     asm("movq %%rbp, %0": "=rm"(rbp)); \
     rbp2=rbp; \
     unsigned long ret = rbp2[1]; \
-    printf("%s(  rbp: %p rbp2: %p ret: %lx)\n", pre, rbp, rbp2, ret); \
     unsigned char *ins = (unsigned char*)ret-5; \
     int* off = (int*)ret-1; \
     unsigned long offset = *(off); \
@@ -25,6 +24,7 @@ main.fa.ret: 0x104d17eb8
     printf("%s( %02x:   ret: %lx   off: %p   offset: %lx   entry: %lx )\n", pre, *ins, ret, off, offset, entry ); \
 }
     //rbp2=(unsigned long*)*rbp; // caller
+    //printf("%s(  rbp: %p rbp2: %p ret: %lx)\n", pre, rbp, rbp2, ret); \
     //printf("%s( %02x entry: %lx )", pre, *((unsigned char*)rbp2[1]-5), *((int*)rbp2[1]-1) + rbp2[1]);
     //printf(" -> ret: %lx \n", rbp2[1]);
 

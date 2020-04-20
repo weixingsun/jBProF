@@ -245,10 +245,15 @@ int do_perf_event_method(struct bpf_perf_event_data *ctx) {
     //struct pt_regs* regs = ((struct pt_regs *)ptr) - 1;
     struct pt_regs* regs = &ctx->regs;
     struct method_key_t key = {.pid = tgid};
-    key.bp = regs->bp;
+    //key.bp = regs->bp;
     //key.ret = regs->r14;
     u64 ret = regs->bp+8;
     bpf_probe_read(&key.ret, sizeof(u64), (void *)ret);
+    u64 offset = 0;
+    int* off = 0;
+    bpf_probe_read(&off, sizeof(u32), (void *)ret-1);
+    bpf_probe_read(&offset, sizeof(u64), (void *)off);
+    key.bp = ret+offset;
     key.user_stack_id = stack_traces.get_stackid(&ctx->regs, BPF_F_USER_STACK);
     key.kernel_stack_id = stack_traces.get_stackid(&ctx->regs, 0);
     if (key.kernel_stack_id >= 0) {
