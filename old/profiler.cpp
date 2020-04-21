@@ -247,14 +247,13 @@ int do_perf_event_method(struct bpf_perf_event_data *ctx) {
     //struct pt_regs* regs = ((struct pt_regs *)ptr) - 1;
     struct pt_regs* regs = &ctx->regs;
     struct method_key_t key = {.pid = tgid};
-    //key.bp = regs->bp;
     //key.ret = regs->r14;
     u64 p_ret = regs->bp+8;
     bpf_probe_read(&key.ret, sizeof(u64), (void *)p_ret);
-    //u64 offset = 0;
-    u32 offset = 0;
+    u32 offset = 0;  // 32bits
     bpf_probe_read(&offset, sizeof(offset), (void *)(key.ret-4) );
     key.bp = key.ret + (int)offset;
+
     key.user_stack_id = stack_traces.get_stackid(&ctx->regs, BPF_F_USER_STACK);
     key.kernel_stack_id = stack_traces.get_stackid(&ctx->regs, 0);
     if (key.kernel_stack_id >= 0) {
@@ -262,25 +261,22 @@ int do_perf_event_method(struct bpf_perf_event_data *ctx) {
         u64 ip = PT_REGS_IP(&ctx->regs);
         u64 page_offset;
         // if ip isn't sane, leave key ips as zero for later checking
-#if defined(CONFIG_X86_64) && defined(__PAGE_OFFSET_BASE)
-        // x64, 4.16, ..., 4.11, etc., but some earlier kernel didn't have it
-        page_offset = __PAGE_OFFSET_BASE;
-#elif defined(CONFIG_X86_64) && defined(__PAGE_OFFSET_BASE_L4)
-        // x64, 4.17, and later
-#if defined(CONFIG_DYNAMIC_MEMORY_LAYOUT) && defined(CONFIG_X86_5LEVEL)
-        page_offset = __PAGE_OFFSET_BASE_L5;
-#else
-        page_offset = __PAGE_OFFSET_BASE_L4;
-#endif
-#else
-        // earlier x86_64 kernels, e.g., 4.6, comes here
-        // arm64, s390, powerpc, x86_32
-        page_offset = PAGE_OFFSET;
-#endif
+        #if defined(CONFIG_X86_64) && defined(__PAGE_OFFSET_BASE)  // x64 (4.11 ... 4.16)
+            page_offset = __PAGE_OFFSET_BASE;
+        #elif defined(CONFIG_X86_64) && defined(__PAGE_OFFSET_BASE_L4)  // x64 ( > 4.17 )
+            #if defined(CONFIG_DYNAMIC_MEMORY_LAYOUT) && defined(CONFIG_X86_5LEVEL)
+                page_offset = __PAGE_OFFSET_BASE_L5;
+            #else
+                page_offset = __PAGE_OFFSET_BASE_L4;
+            #endif
+        #else   // x64 (4.6 + arm64, s390, powerpc, x86_32 )
+            page_offset = PAGE_OFFSET;
+        #endif
         if (ip > page_offset) {
             key.kernel_ip = ip;
         }
     }
+    
     counts.increment(key);
     return 0;
 }
@@ -729,7 +725,7 @@ vector<string> PrintTopMethods(int N){
     method_type methods[N];
     vector<string> vs;
     for (multimap<int,method_type>::const_reverse_iterator it = rmap.rbegin(); it!=rmap.rend(); ++it){
-        fprintf(out, "%d\t %lx\t %s\n", it->first, it->second.addr, it->second.name.c_str() );
+        fprintf(out, "%d\t %lx -> %lx\t %s\n", it->first, it->second.addr, it->second.ret, it->second.name.c_str() );
         vs.push_back(it->second.name);
         if (i<N) methods[i++]=it->second;
     }
