@@ -386,7 +386,6 @@ string replace_string(string text, char t, char s){
     return text;
 }
 int get_static_int(JNIEnv* jni, string cls_name, string field_name){
-    //string cn = replace_string(cls_name,'.','/');
     jclass cls = jni->FindClass(cls_name.c_str());
     jfieldID f = jni->GetStaticFieldID(cls, field_name.c_str(), "I");
     return jni->GetStaticIntField(cls,f);
@@ -402,9 +401,16 @@ float get_static_float(JNIEnv* jni, string cls_name, string field_name){
     return jni->GetStaticFloatField(cls,f);
 }
 void set_static_float(JNIEnv* jni, string cls_name, string field_name, float value){
-    jclass cls = jni->FindClass(replace_string(cls_name,'.','/').c_str());
+    jclass cls = jni->FindClass(cls_name.c_str());
     jfieldID f = jni->GetStaticFieldID(cls, field_name.c_str(), "F");
     jni->SetStaticFloatField(cls,f,value);
+}
+void exec_static_void(JNIEnv* jni, string cls_name, string method_name, string mod){
+    jclass cls = jni->FindClass(cls_name.c_str());
+    if(!cls) cout<<"class not found"<<endl;
+    jmethodID m = jni->GetStaticMethodID(cls, method_name.c_str(), mod.c_str());
+    if(!m) cout<<"method not found"<<endl;
+    jni->CallStaticVoidMethod(cls, m, 1);
 }
 bool string_contains(string str, string c){
     if (str.find(c) != string::npos) return true;
@@ -452,7 +458,7 @@ int tune_int(int v, string algo, string max){
     }
     return 0;
 }
-void tune(JNIEnv* env, string cls_name, string field_name, string field_type, string max, string algo){
+void tune_static(JNIEnv* env, string cls_name, string field_name, string field_type, string max, string algo){
     if(field_type=="I"){
         int v = get_static_int(env,cls_name,field_name);
         int v2 = tune_int(v,algo,max);
@@ -692,7 +698,7 @@ vector<string> PrintTopMethods(int N){
         return a.second > b.second;
       }
     );
-    fprintf(stdout, "count \t entry   \t ret   \t name\n");
+    //fprintf(stdout, "count \t entry   \t ret   \t name\n");
     map<method_type, int> mout;		//addr ret name  count
     for (auto it : table) {
         //uint64_t method_addr;
@@ -864,7 +870,8 @@ void gen_perf_file(){
     jvmti->SetHeapSamplingInterval(10*1024*1024); //10m
 }
 void read_cfg(string filename){
-    //java/util/HashMap  DEFAULT_INITIAL_CAPACITY  I  +  2048  *2  java.util.HashMap.resize
+    //java.util.HashMap.resize		java.util.HashMap$I^DEFAULT_INITIAL_CAPACITY    *2<2048
+    //java.util.HashMap.resize		Main$increaseMap()
     ifstream in(filename.c_str());
     if(!in) cerr<<"Error open cfg file:"<<filename<<endl;
     string str;
@@ -925,32 +932,52 @@ void print_vector(vector<string> v){
         cout<<"    "<<s<<endl;
     }
 }
+void modify_field(vector<string> field){
+    vector<string> cls_vec = str_2_vec(field[1],'$');
+    string class_name = replace_string(cls_vec[0], '.', '/');
+    vector<string> fld_vec = str_2_vec(cls_vec[1],'^');
+    string field_name = fld_vec[1];
+    string field_type = fld_vec[0];
+    string f1 = field[2];
+    string algo ;
+    string max ;
+    if( string_contains(f1,">") ){
+        vector<string> fv = str_2_vec(field[2],'>');
+        algo = fv[0];
+        max = fv[1];
+    }else{
+        vector<string> fv = str_2_vec(field[2],'<');
+        algo = fv[0];
+        max = fv[1];
+    }
+    //cout<<"----------cls='"<< class_name<<"' f='"<< field_name<<"' t='"<< field_type<<"' a='"<< algo<<"' m='"<< max<<"'"<<endl;
+    tune_static(jni, class_name, field_name, field_type, max, algo);
+}
+inline bool str_ends_with(string const & value, string const & ending){
+    if (ending.size() > value.size()) return false;
+    return equal(ending.rbegin(), ending.rend(), value.rbegin());
+}
+void exec_method(string method){
+    cout<<"executing method: "<<method<<endl;
+    vector<string> cls_vec = str_2_vec(method,'$');
+    string class_name = replace_string(cls_vec[0], '.', '/');
+    vector<string> mtd_vec = str_2_vec(cls_vec[1],'^');
+    string method_name = mtd_vec[1];
+    method_name.erase(method_name.length()-2);
+    string mod = mtd_vec[0];
+    //cout<<"class: "<<class_name<<"  method: "<<method_name<<"  mod:"<<mod<<endl;
+    exec_static_void(jni,class_name,method_name,mod);
+}
 void tune_all_fields(vector<string> TUNE_OPTIONS, vector<string> results){
     if(TUNE_OPTIONS.size()>0){
         for(string line : TUNE_OPTIONS){
             vector<string> field = str_2_vec(line,'\t');
             if (find(results.begin(), results.end(), field[0]) != results.end()){
-                //java.util.HashMap.resize     java.util.HashMap$I^DEFAULT_INITIAL_CAPACITY    *2<2048
+                //java.util.HashMap.resize	java.util.HashMap$I^DEFAULT_INITIAL_CAPACITY    *2<2048
+                //java.util.HashMap.resize	Main$IncreaseInitMapSize()
                 //print_vector(field);
-                vector<string> cls_vec = str_2_vec(field[1],'$');
-                string class_name = replace_string(cls_vec[0], '.', '/');
-                vector<string> fld_vec = str_2_vec(cls_vec[1],'^');
-                string field_name = fld_vec[1];
-                string field_type = fld_vec[0];
-                string f1 = field[2];
-                string algo ;
-                string max ;
-                if( string_contains(f1,">") ){
-                    vector<string> fv = str_2_vec(field[2],'>');
-                    algo = fv[0];
-                    max = fv[1];
-                }else{
-                    vector<string> fv = str_2_vec(field[2],'<');
-                    algo = fv[0];
-                    max = fv[1];
-                }
-                //cout<<"----------cls='"<< class_name<<"' f='"<< field_name<<"' t='"<< field_type<<"' a='"<< algo<<"' m='"<< max<<"'"<<endl;
-                tune(jni, class_name, field_name, field_type, max, algo);
+                if( str_ends_with (field[1], "()") ) exec_method(field[1]);
+                else modify_field(field);
             }
         }
     }
