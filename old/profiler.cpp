@@ -484,8 +484,7 @@ void SetupTimer(int duration, int interval, __sighandler_t timer_handler){
 }
 void JNICALL SampledObjectAlloc(jvmtiEnv* jvmti, JNIEnv* env, jthread thread,
                                 jobject object, jclass object_klass, jlong size) {
-    //Save JNI per thread
-    if (jni == NULL) jni = env;
+    //if (jni == NULL) jni = env;
 }
 
 void JNICALL VMDeath(jvmtiEnv* jvmti, JNIEnv* env) {
@@ -820,7 +819,7 @@ void registerCapa(jvmtiEnv* jvmti){
     capa.can_tag_objects = 1;
     capa.can_generate_all_class_hook_events = 1;
     capa.can_generate_compiled_method_load_events = 1;
-    capa.can_generate_sampled_object_alloc_events = 1;
+    //capa.can_generate_sampled_object_alloc_events = 1;
     //capa.can_generate_garbage_collection_events = 1;
     //capa.can_generate_object_free_events = 1;
     //capa.can_generate_vm_object_alloc_events = 1;
@@ -831,7 +830,7 @@ void registerCall(jvmtiEnv* jvmti){
     //call.GarbageCollectionStart = GarbageCollectionStart;
     //call.GarbageCollectionFinish = GarbageCollectionFinish;
     //call.VMInit = VMInit;
-    call.SampledObjectAlloc = SampledObjectAlloc;
+    //call.SampledObjectAlloc = SampledObjectAlloc;
     call.CompiledMethodLoad = CompiledMethodLoad;
     call.CompiledMethodUnload = CompiledMethodUnload;
     call.DynamicCodeGenerated = DynamicCodeGenerated;
@@ -844,7 +843,7 @@ void disableAllEvents(){
     jvmti->SetEventNotificationMode(JVMTI_DISABLE, JVMTI_EVENT_COMPILED_METHOD_LOAD, NULL);
     jvmti->SetEventNotificationMode(JVMTI_DISABLE, JVMTI_EVENT_COMPILED_METHOD_UNLOAD, NULL);
     jvmti->SetEventNotificationMode(JVMTI_DISABLE, JVMTI_EVENT_DYNAMIC_CODE_GENERATED, NULL);
-    jvmti->SetEventNotificationMode(JVMTI_DISABLE, JVMTI_EVENT_SAMPLED_OBJECT_ALLOC, NULL);
+    //jvmti->SetEventNotificationMode(JVMTI_DISABLE, JVMTI_EVENT_SAMPLED_OBJECT_ALLOC, NULL);
 }
 void enableEvent(jvmtiEnv* jvmti){
     //jvmti->SetEventNotificationMode(JVMTI_ENABLE, JVMTI_EVENT_GARBAGE_COLLECTION_START, NULL);
@@ -853,7 +852,7 @@ void enableEvent(jvmtiEnv* jvmti){
     jvmti->SetEventNotificationMode(JVMTI_ENABLE, JVMTI_EVENT_COMPILED_METHOD_LOAD, NULL);
     jvmti->SetEventNotificationMode(JVMTI_ENABLE, JVMTI_EVENT_COMPILED_METHOD_UNLOAD, NULL);
     jvmti->SetEventNotificationMode(JVMTI_ENABLE, JVMTI_EVENT_DYNAMIC_CODE_GENERATED, NULL);
-    jvmti->SetEventNotificationMode(JVMTI_ENABLE, JVMTI_EVENT_SAMPLED_OBJECT_ALLOC, NULL);
+    //jvmti->SetEventNotificationMode(JVMTI_ENABLE, JVMTI_EVENT_SAMPLED_OBJECT_ALLOC, NULL);
 
     jvmti->GenerateEvents(JVMTI_EVENT_DYNAMIC_CODE_GENERATED);
     jvmti->GenerateEvents(JVMTI_EVENT_COMPILED_METHOD_LOAD);
@@ -1013,6 +1012,7 @@ JNIEXPORT jint JNICALL Agent_OnLoad(JavaVM* vm, char* options, void* reserved) {
     InitFile();
     gen_bpf_map();
     vm->GetEnv((void**) &jvmti, JVMTI_VERSION_1_0);
+    getJNI(vm);
     jvmti->CreateRawMonitor("tree_lock", &tree_lock);
     int id = -1;
     if (options != NULL) {
