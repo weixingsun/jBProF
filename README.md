@@ -97,6 +97,8 @@ Features:
         sample_method=9
         log_file=method.log
         rule: java.util.HashMap.resize	java.util.HashMap$I^DEFAULT_INITIAL_CAPACITY 	x4<1024
+	rule: java.util.HashMap.resize	Main$()V^IncreaseMapInitSize()
+        rule: java.util.HashMap.resize>1s	Main$()V^IncreaseMapInitSize()
         rule: java.util.ArrayList.grow	java.util.ArrayList$I^DEFAULT_CAPACITY       	x2<2048
         rule: java.util.HashMap.getNode	java.util.HashMap$F^DEFAULT_LOAD_FACTOR      	-0.05>0.2
         action_n=3
@@ -134,5 +136,4 @@ Todo || Issues:
     
     1. sometimes there may be duplicated method, it usually caused by JIT recompilation.
     2. add feature to get instance level variable values, like ArrayList.size, HashMap.size, from JVMTI api
-    3. add feature to trigger tuning when a method latency > threshold.
-    4. add feature to report on factors which selected by PCA.
+    3. add feature to report on factors which selected by PCA.
