@@ -52,6 +52,13 @@ static map<int,string> BPF_FN_MAP;
 static map<string,int> MEM_MAP;
 static vector<string> TUNE_CLASS;
 
+struct PartialMatch {
+    string s;
+    PartialMatch(const string& str) : s(str) {}
+    bool operator()(const string& in){
+        return in.find(s) != string::npos;
+    }
+};
 struct method_type {
     uint64_t    addr;
     uint64_t    ret;
@@ -417,6 +424,11 @@ bool string_contains(string str, string c){
     else return false;
 }
 bool BothAreSpaces(char lhs, char rhs ) { return (lhs == rhs) && (lhs == ' '); }
+void vec_remove(vector<string> vs, string s){
+    //vs.erase(remove(vs.begin(), vs.end(), s), vs.end());
+    auto pos = find(vs.begin(), vs.end(), s);
+    if( pos != vs.end() ) vs.erase(pos);
+}
 vector<string> str_2_vec( string str, char sep){
     string::iterator new_end = unique(str.begin(), str.end(), BothAreSpaces);
     str.erase(new_end, str.end());
@@ -589,7 +601,7 @@ void StopBPF(){
     }
     bpf.detach_perf_event(PERF_TYPE_SOFTWARE, PERF_COUNT_HW_CPU_CYCLES);
 }
-vector<string> PrintThread(int N){
+map<string,long> PrintThread(int N){
     auto table = bpf.get_hash_table<thread_key_t, uint64_t>("counts").get_table_offline();
     
     sort( table.begin(), table.end(),
@@ -604,14 +616,15 @@ vector<string> PrintThread(int N){
     for (auto it : table) {
 	total_samples+=it.second;
     }
+    map<string,long> msl;
     int i = 0;
     for (auto it : table) {
         if (++i>N) break;
 	fprintf(out, "%d\t%d\t%ld\t%0.2f\t%s\n", it.first.pid,it.first.tid,it.second, (float)100*it.second/total_samples, it.first.name );
+	msl.insert({it.first.name, 100*it.second/total_samples});
     }
     fclose(out);
-    vector<string> vs;
-    return vs;
+    return msl;
 }
 template <typename A, typename B> multimap<B, A> flip_map(map<A,B> & src) {
     multimap<B,A> dst;
@@ -665,7 +678,7 @@ void CountMethods(method_type methods[], int n){
     PrintTopMethodCount(methods,n);
     PrintTopMethodRetCount(methods,n);
 }
-void LatencyMethod(method_type method){
+long LatencyMethod(method_type method){
     perf_event_attr peas[2];
     peas[0]  =AttachBreakPoint(method.addr, "func_entry", 0);
     peas[1]=AttachBreakPoint(method.ret, "func_return", 0);
@@ -682,13 +695,16 @@ void LatencyMethod(method_type method){
     );
     fprintf(out, "\n(%ld) latency for method: (%lx -> %lx)\t\"%s\"\n", dist.size(), method.addr, method.ret, method.name.c_str() );
     fprintf(out, "nsecs    \t count\n"); // distribution\n");
+    long lat = 0;
     for (auto it=dist.begin(); it!=dist.end();it++) {
-        fprintf(out, ">%ld     \t %ld\t \n", (long)exp2(it->first), it->second );
+        lat = exp2(it->first);
+        fprintf(out, ">%ld     \t %ld\t \n", lat, it->second );
     }
     dist.clear();
+    return lat;
 }
 
-vector<string> PrintTopMethods(int N){
+map<string,long> PrintTopMethods(int N){
     auto t = bpf.get_hash_table<method_key_t, uint64_t>("counts");
     auto table = t.get_table_offline();
     auto stacks = bpf.get_stack_table("stack_traces");
@@ -728,10 +744,10 @@ vector<string> PrintTopMethods(int N){
     //cout<<"flip method done, printing ("<< rmap.size()<<")"<<endl;
     int i=0;
     method_type methods[N];
-    vector<string> vs;
+    map<string,long> msl;
     for (multimap<int,method_type>::const_reverse_iterator it = rmap.rbegin(); it!=rmap.rend(); ++it){
         fprintf(out, "%d\t %lx -> %lx\t %s\n", it->first, it->second.addr, it->second.ret, it->second.name.c_str() );
-        vs.push_back(it->second.name);
+        msl.insert({it->second.name, it->first});
         if (i<N) methods[i++]=it->second;
     }
     //cout<<"method array done, printing ("<< n<<")"<<endl;
@@ -742,14 +758,18 @@ vector<string> PrintTopMethods(int N){
     if(LAT_TOP_N>0){
         cout<<"start latency measuring..."<<endl;
         for (int i=0; i<LAT_TOP_N; i++){
-            LatencyMethod(methods[i]);
+            long maxLat = LatencyMethod(methods[i]);
+	    msl.erase( methods[i].name);
+	    //cout<<"method "<<methods[i].name<<" removed --------------"<<endl;
+	    msl.insert({methods[i].name, maxLat});
+	    //cout<<"method "<<methods[i].name<<" = "<<maxLat<<" added --------------"<<endl;
         }
     }
     fflush(out);
     t.clear_table_non_atomic();
-    return vs;
+    return msl;
 }
-vector<string> PrintFlame(){
+map<string,long> PrintFlame(){
     auto table = bpf.get_hash_table<stack_key_t, uint64_t>("counts").get_table_offline();
     sort( table.begin(), table.end(),
       [](pair<stack_key_t, uint64_t> a, pair<stack_key_t, uint64_t> b) {
@@ -786,18 +806,18 @@ vector<string> PrintFlame(){
         fprintf(out, "      %ld\n", it.second);
     }
     fclose(out);
-    vector<string> vs;
+    map<string,long> vs;
     return vs;
 }
 
-vector<string> PrintBPF(unsigned long id){
-    vector<string> vs;
+map<string,long> PrintBPF(unsigned long id){
+    map<string,long> msl;
     switch((int)log2(id)){
         case 0: return PrintFlame();
         case 1: return PrintThread(SAMPLE_TOP_N);
         case 2: return PrintTopMethods(SAMPLE_TOP_N);
     }
-    return vs;
+    return msl;
 }
 vector<string> parse_options(string str, char sep){
     istringstream ss(str);
@@ -926,8 +946,14 @@ void InitFile() {
     cout << "perf map: "<< path<< endl;
     out_perf = fopen(path.c_str(),"w");
 }
+template<typename K, typename V>
+void print_map(map<K,V> const &m){
+    for (auto const& pair: m) {
+        std::cout << "{" << pair.first << ": " << pair.second << "}\n";
+    }
+}
 void print_vector(vector<string> v){
-    cout<<"print vector: "<<endl;
+    cout<<"print vector: ---------------"<<endl;
     for(string s : v){
         cout<<"    "<<s<<endl;
     }
@@ -968,14 +994,57 @@ void exec_method(string method){
     //cout<<"class: "<<class_name<<"  method: "<<method_name<<"  mod:"<<mod<<endl;
     exec_static_void(jni,class_name,method_name,mod);
 }
-void tune_all_fields(vector<string> TUNE_OPTIONS, vector<string> results){
+vector<string> method_latency(string s){
+    vector<string> vs;
+    if( s.find(">") != string::npos ) {
+        vs = str_2_vec(s,'>');
+        vs.push_back(">");
+    }else if( s.find("<") != string::npos ) {
+        vs = str_2_vec(s,'<');
+        vs.push_back("<");
+    }else{  //no > <
+        vs.push_back(s);
+    }
+    return vs;
+}
+// 1s  -> 1000ms
+// 1ms -> 1000us
+// 1us -> 1000ns
+long get_ns_from_cfg(string str){
+    if( str_ends_with(str,"us") ){ //us
+        str.pop_back();str.pop_back();
+        return stol(str)*1000;
+    }else if( str_ends_with(str,"ms") ){ //ms
+        str.pop_back();str.pop_back();
+        return stol(str)*1000*1000;
+    }else if( str_ends_with(str,"s") ){ //s
+        str.pop_back();
+        return stol(str)*1000*1000*1000;
+    }else{  //else = ns
+        str.pop_back();str.pop_back();
+        return stol(str);
+    }
+}
+void tune_all_fields(vector<string> TUNE_OPTIONS, map<string,long> results){
     if(TUNE_OPTIONS.size()>0){
         for(string line : TUNE_OPTIONS){
             vector<string> field = str_2_vec(line,'\t');
-            if (find(results.begin(), results.end(), field[0]) != results.end()){
-                //java.util.HashMap.resize	java.util.HashMap$I^DEFAULT_INITIAL_CAPACITY    *2<2048
-                //java.util.HashMap.resize	Main$IncreaseInitMapSize()
-                //print_vector(field);
+            //java.util.HashMap.resize		java.util.HashMap$I^DEFAULT_INITIAL_CAPACITY    *2<2048
+            //java.util.HashMap.resize		Main$IncreaseInitMapSize()
+            //java.util.HashMap.resize>1s	Main$IncreaseInitMapSize()
+            vector<string> vec_method = method_latency(field[0]);
+	    map<string,long>::iterator it = results.find(vec_method[0]);
+	    if( it != results.end()) {
+                long lat = it->second;
+                if(vec_method.size()>2 && lat>0 ){
+		    long threshold = get_ns_from_cfg(vec_method[1]);
+		    //cout<<"latency check : ------> "<<lat<<" --- "<<threshold<<endl;
+		    if( vec_method[2] == ">" && lat < threshold ) continue;
+		    else if(vec_method[2] == "<" && lat > threshold) continue;
+		    //cout<<"latency check success: ------> "<<lat<<" : "<<threshold<<endl;
+		}
+                //print_map(results);
+                //print_vector(vec_method);
                 if( str_ends_with (field[1], "()") ) exec_method(field[1]);
                 else modify_field(field);
             }
@@ -1028,7 +1097,7 @@ void profile(int id){
     for (int i=0;i<TUNING_N;i++){
         StartBPF(id);
         StopBPF();
-        vector<string> results = PrintBPF(id);
+        map<string,long> results = PrintBPF(id);
         //print_vector(results);
         tune_all_fields(TUNE_CLASS, results);
     }
