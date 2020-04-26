@@ -757,9 +757,10 @@ map<string,long> PrintTopMethods(int N){
     }
     if(LAT_TOP_N>0){
         cout<<"start latency measuring..."<<endl;
+	msl.clear();
         for (int i=0; i<LAT_TOP_N; i++){
             long maxLat = LatencyMethod(methods[i]);
-	    msl.erase( methods[i].name);
+	    //msl.erase( methods[i].name);
 	    //cout<<"method "<<methods[i].name<<" removed --------------"<<endl;
 	    msl.insert({methods[i].name, maxLat});
 	    //cout<<"method "<<methods[i].name<<" = "<<maxLat<<" added --------------"<<endl;
@@ -1010,19 +1011,28 @@ vector<string> method_latency(string s){
 // 1s  -> 1000ms
 // 1ms -> 1000us
 // 1us -> 1000ns
-long get_ns_from_cfg(string str){
-    if( str_ends_with(str,"us") ){ //us
-        str.pop_back();str.pop_back();
-        return stol(str)*1000;
-    }else if( str_ends_with(str,"ms") ){ //ms
-        str.pop_back();str.pop_back();
-        return stol(str)*1000*1000;
-    }else if( str_ends_with(str,"s") ){ //s
-        str.pop_back();
-        return stol(str)*1000*1000*1000;
-    }else{  //else = ns
+long get_num_from_str(string str){
+    if( str_ends_with(str,"ns") ){
         str.pop_back();str.pop_back();
         return stol(str);
+    }else if( str_ends_with(str,"us") ){
+        str.pop_back();str.pop_back();
+        return stol(str)*1000;
+    }else if( str_ends_with(str,"ms") ){
+        str.pop_back();str.pop_back();
+        return stol(str)*1000*1000;
+    }else if( str_ends_with(str,"s") ){
+        str.pop_back();
+        return stol(str)*1000*1000*1000;
+    }else if( str_ends_with(str,"k") ){
+        str.pop_back();
+        return stol(str)*1024;
+    }else if( str_ends_with(str,"m") ){
+        str.pop_back();
+        return stol(str)*1024*1024;
+    }else if( str_ends_with(str,"g") ){
+        str.pop_back();
+        return stol(str)*1024*1024*1024;
     }
 }
 void tune_all_fields(vector<string> TUNE_OPTIONS, map<string,long> results){
@@ -1037,7 +1047,7 @@ void tune_all_fields(vector<string> TUNE_OPTIONS, map<string,long> results){
 	    if( it != results.end()) {
                 long lat = it->second;
                 if(vec_method.size()>2 && lat>0 ){
-		    long threshold = get_ns_from_cfg(vec_method[1]);
+		    long threshold = get_num_from_str(vec_method[1]);
 		    //cout<<"latency check : ------> "<<lat<<" --- "<<threshold<<endl;
 		    if( vec_method[2] == ">" && lat < threshold ) continue;
 		    else if(vec_method[2] == "<" && lat > threshold) continue;
