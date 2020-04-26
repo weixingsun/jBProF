@@ -136,4 +136,4 @@ Todo || Issues:
     
     1. sometimes there may be duplicated method, it usually caused by JIT recompilation.
     2. add feature to get instance level variable values, like ArrayList.size, HashMap.size, from JVMTI api
-    3. add feature to report on factors which selected by PCA.
+    3. add feature to report on factors which selected by bayes.
