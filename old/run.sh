@@ -76,8 +76,8 @@ if [ $? = 0 ]; then
 
     #jcmd_attach "sample_duration=3;sample_method=9;log_file=method.log;rule_cfg=tune.cfg;wait=1"
     #jcmd_attach "sample_duration=3;sample_method=9;log_file=method.log;method_rules=tune.cfg;action_n=3;start_until=.PROF%start"
-    #jcmd_attach "sample_duration=3;sample_method=9;log_file=method.log;method_rules=tune.cfg;action_n=3;start_until=.PROF%start;monitor_duration=3;lat_top=2"
-    jcmd_attach "sample_duration=3;sample_method=9;log_file=method.log;monitor_duration=3;lat_top=2"
+    jcmd_attach "sample_duration=3;sample_method=9;log_file=method.log;config_rules=tune.cfg;monitor_duration=3;lat_top=2"
+    #jcmd_attach "sample_duration=3;sample_method=9;log_file=method.log;monitor_duration=3;lat_top=2"
 
     #run_with_agent "sample_duration=5;sample_method=9" #;log_file=method.log;wait=8;method_rules=tune.cfg;action_n=2
     #run_with_agent $AGENT "sample_duration=10;sample_mem=9;log_file=mem.log;count_alloc=1"

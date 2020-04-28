@@ -50,7 +50,7 @@ static ebpf::BPF bpf;
 static map<int,string> BPF_TXT_MAP;
 static map<int,string> BPF_FN_MAP;
 static map<string,int> MEM_MAP;
-static vector<string> TUNE_CLASS;
+static vector<string> TUNE_RULES;
 
 struct PartialMatch {
     string s;
@@ -898,7 +898,7 @@ void read_cfg(string filename){
     string str;
     while(getline(in,str)){
         if(str.size()>0) {
-            TUNE_CLASS.push_back(str);
+            TUNE_RULES.push_back(str);
             cout<<"rule: "<<str<<endl;
         }
     }
@@ -928,7 +928,7 @@ int do_single_options(string k, string v){
         LAT_TOP_N=stoi(v);
     }else if(k.compare("count_top")==0){
         COUNT_TOP_N=stoi(v);
-    }else if(k.compare("method_rules")==0){
+    }else if(k.compare("config_rules")==0){
         read_cfg(v);
     }else if(k.compare("action_n")==0){
         TUNING_N=stoi(v);
@@ -995,13 +995,24 @@ void exec_method(string method){
     //cout<<"class: "<<class_name<<"  method: "<<method_name<<"  mod:"<<mod<<endl;
     exec_static_void(jni,class_name,method_name,mod);
 }
-vector<string> method_latency(string s){
+vector<string> merge_vec(vector<string> v1, vector<string> v2){
+    v1.insert( v1.end(), v2.begin(), v2.end() );
+    return v1;
+}
+vector<string> parse_cond(string s){
     vector<string> vs;
+    if( s[0] == 'M' ) {
+        vs.push_back("M");
+	s.erase(0,2);
+    }else if( s[0] == 'T' ) {
+        vs.push_back("T");
+	s.erase(0,2);
+    }
     if( s.find(">") != string::npos ) {
-        vs = str_2_vec(s,'>');
+        vs=merge_vec(vs, str_2_vec(s,'>'));
         vs.push_back(">");
     }else if( s.find("<") != string::npos ) {
-        vs = str_2_vec(s,'<');
+        vs=merge_vec(vs, str_2_vec(s,'<'));
         vs.push_back("<");
     }else{  //no > <
         vs.push_back(s);
@@ -1039,22 +1050,23 @@ void tune_all_fields(vector<string> TUNE_OPTIONS, map<string,long> results){
     if(TUNE_OPTIONS.size()>0){
         for(string line : TUNE_OPTIONS){
             vector<string> field = str_2_vec(line,'\t');
-            //java.util.HashMap.resize		java.util.HashMap$I^DEFAULT_INITIAL_CAPACITY    *2<2048
-            //java.util.HashMap.resize		Main$IncreaseInitMapSize()
-            //java.util.HashMap.resize>1s	Main$IncreaseInitMapSize()
-            vector<string> vec_method = method_latency(field[0]);
-	    map<string,long>::iterator it = results.find(vec_method[0]);
+            //M:java.util.HashMap.resize	java.util.HashMap$I^DEFAULT_INITIAL_CAPACITY    *2<2048
+            //M:java.util.HashMap.resize	Main$IncreaseInitMapSize()
+            //M:java.util.HashMap.resize>1s	Main$IncreaseInitMapSize()
+	    //T:java>99
+            vector<string> vec_cond = parse_cond(field[0]);
+            print_vector(vec_cond);
+	    map<string,long>::iterator it = results.find(vec_cond[1]);
 	    if( it != results.end()) {
-                long lat = it->second;
-                if(vec_method.size()>2 && lat>0 ){
-		    long threshold = get_num_from_str(vec_method[1]);
-		    //cout<<"latency check : ------> "<<lat<<" --- "<<threshold<<endl;
-		    if( vec_method[2] == ">" && lat < threshold ) continue;
-		    else if(vec_method[2] == "<" && lat > threshold) continue;
-		    //cout<<"latency check success: ------> "<<lat<<" : "<<threshold<<endl;
+                long num = it->second;
+                if(vec_cond.size()>3 && num>0 ){
+		    long threshold = get_num_from_str(vec_cond[2]);
+		    //cout<<"condition check : ------> "<<num<<" --- "<<threshold<<endl;
+		    if( vec_cond[3] == ">" && num < threshold ) continue;
+		    else if(vec_cond[3] == "<" && num > threshold) continue;
+		    cout<<"condition check success: ------> "<<num<<" : "<<threshold<<endl;
 		}
                 //print_map(results);
-                //print_vector(vec_method);
                 if( str_ends_with (field[1], "()") ) exec_method(field[1]);
                 else modify_field(field);
             }
@@ -1109,7 +1121,7 @@ void profile(int id){
         StopBPF();
         map<string,long> results = PrintBPF(id);
         //print_vector(results);
-        tune_all_fields(TUNE_CLASS, results);
+        tune_all_fields(TUNE_RULES, results);
     }
 }
 JNIEXPORT jint JNICALL Agent_OnLoad(JavaVM* vm, char* options, void* reserved) {
