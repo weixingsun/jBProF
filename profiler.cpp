@@ -20,7 +20,6 @@
 
 using namespace std;
 
-#define MAX_STACK_DEPTH 128
 static bool writing_perf = false;
 static FILE* out_cpu;
 static FILE* out_thread;
