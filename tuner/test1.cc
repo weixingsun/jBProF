@@ -24,9 +24,9 @@ Eigen::VectorXd square(Eigen::MatrixXd X){
     return V;
 }
 
-libgp::GaussianProcess* init( int input_dim, int param_dim) {
+libgp::GaussianProcess* init( int input_dim ) {
     libgp::GaussianProcess* gp = new libgp::GaussianProcess(input_dim, "CovSum ( CovSEiso, CovNoise)");
-    Eigen::VectorXd params(param_dim);
+    Eigen::VectorXd params(gp->covf().get_param_dim());
     params << 0, 0, log(0.01);                                            ////////////////////////////////////////////////////////////////////
         Eigen::VectorXd p0 = gp->covf().get_loghyper();
         cout<<"p0.size()="<<p0.size()<<"\n"<<p0<<endl;
@@ -53,13 +53,13 @@ libgp::GaussianProcess* init( int input_dim, int param_dim) {
 }
 
 
-void test(libgp::GaussianProcess* gp,int param_dim){
-  Eigen::VectorXd params(param_dim);
-  params <<  -1, -1, -1;                                                  ////////////////////////////////////////////////////////////////////
-  Eigen::VectorXd p0 = gp->covf().get_loghyper();
-  cout<<"p0=\n"<<p0<<endl;
-  cout<<"params=\n"<<params<<endl;
-  gp->covf().set_loghyper(params);
+void test(libgp::GaussianProcess* gp){
+  //Eigen::VectorXd params(gp->covf().get_input_dim());
+  //params <<  -1, -1, -1;                                                  ////////////////////////////////////////////////////////////////////
+  //Eigen::VectorXd p0 = gp->covf().get_loghyper();
+  //cout<<"p0=\n"<<p0<<endl;
+  //cout<<"params=\n"<<params<<endl;
+  //gp->covf().set_loghyper(params);
 
   libgp::RProp rprop;
   rprop.init();
@@ -76,6 +76,6 @@ void test(libgp::GaussianProcess* gp,int param_dim){
 
 int main(){
     int input_dim=1, param_dim=3;
-    libgp::GaussianProcess * gp = init(input_dim, param_dim);
-    test(gp,param_dim);
+    libgp::GaussianProcess * gp = init(input_dim);
+    test(gp);
 }
