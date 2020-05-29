@@ -1,76 +1,88 @@
 SRC=profiler.cpp
-AGENT=profiler.so
-if [ ! -f $SRC ]; then
-    mv $AGENT $SRC
-fi
-rm -rf $AGENT log thread.log cpu.log mem.log hs_err* jcmd.log /tmp/perf*  #flame.svg
-kill -9 `ps -ef|grep java|grep -v grep |awk '{print $2}'`
-LOOP="1000 200000"
-JIT="-Xmx400m -Xms10m -XX:+UseParallelOldGC -XX:ParallelGCThreads=1 -XX:+PreserveFramePointer" # -XX:+DTraceMethodProbes" #-XX:+ExtendedDTraceProbes
+AGT=prof
+AGENT=lib$AGT.so
+BIN=jbprof
+sudo rm -rf $AGENT $BIN log thread.log cpu.log mem.log hs_err* jcmd.log /tmp/perf* /tmp/.java_pid* .attach_pid*  #flame.svg
+sudo kill -9 `pgrep java`
+LOOP="2000 4000000"
+JIT="-Xmx400m -Xms10m -XX:+UseParallelGC -XX:ParallelGCThreads=1 -XX:+PreserveFramePointer" # -XX:+DTraceMethodProbes" #-XX:+ExtendedDTraceProbes
 
-JAVA_HOME=/home/sun/jbb/jdk13
+JAVA_HOME=/home/sun/jbb/jdk
 java_build(){
     $JAVA_HOME/bin/javac Main.java
 }
 cpp_build(){
-  BCC=/home/sun/perf_tuning_results/jvm/bcc
+  BCC=/home/sun/jbb/bcc
   BCC_INC="-I$BCC/src/cc -I$BCC/src/cc/api -I$BCC/src/cc/libbpf/include/uapi"
   CC=clang
-  CPP=clang++
+  CPP=g++
+  #CPP=clang++
   OS=linux
   JAVA_INC="-I$JAVA_HOME/include -I$JAVA_HOME/include/$OS"
-  export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/lib/
-  export LIBRARY_PATH=$LIBRARY_PATH:/usr/local/lib/
-  LIB="-shared -lbcc -lstdc++"
+  #export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/lib/
+  #export LIBRARY_PATH=$LIBRARY_PATH:/usr/local/lib/
+  LIB="-lbcc -lpthread"
   #LIB="-shared -lbcc -lstdc++ "
-  OPTS="-O3 -fPIC $JAVA_INC $BCC_INC $LIB"
-  #echo "$CPP -o $AGENT profiler.cpp $OPTS"
-        $CPP -o $AGENT profiler.cpp $OPTS
+  OPTS="-O3 -fPIC -shared $JAVA_INC $BCC_INC $LIB"
+  echo "$CPP $SRC $OPTS -o $AGENT"
+        $CPP $SRC $OPTS -o $AGENT
+  echo "agent done."
+  OPTS="-g -O0 $JAVA_INC $BCC_INC $LIB"
+  OPTS="-O3 $JAVA_INC $BCC_INC $LIB"
+  echo "$CPP $SRC $OPTS -o $BIN"
+        $CPP $SRC $OPTS -o $BIN
+  #echo "binary done."
 }
 
-run_and_attach(){
-    AGT=$1
-    OPT=$2
+attach(){
+    echo "$JAVA_HOME/bin/java $JIT Main $LOOP"
+    time $JAVA_HOME/bin/java $JIT Main $LOOP &
+    sleep 1
+    pid=`pgrep java`
+    OPT=$1
+    #export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:`pwd`
+    echo "./$BIN $pid `pwd`/$AGENT $OPT"
+    sudo ./$BIN $pid `pwd`/$AGENT "$OPT"
+}
+jcmd_attach(){
+    OPT=$1
     time $JAVA_HOME/bin/java $JIT Main $LOOP &
     sleep 1
     pid=`pgrep java`
     #/usr/share/bcc/tools/tplist -p $pid
-    #echo "$JAVA_HOME/bin/jcmd $pid JVMTI.agent_load ./$AGT $OPT"
-    $JAVA_HOME/bin/jcmd $pid JVMTI.agent_load ./$AGT "\"$OPT\"" > jcmd.log 2>&1
+    echo "$JAVA_HOME/bin/jcmd $pid JVMTI.agent_load ./$AGENT $OPT"
+    sudo  $JAVA_HOME/bin/jcmd $pid JVMTI.agent_load ./$AGENT "\"$OPT\""
     #python method.py -F 99 -p $pid -f 3 > profile.out
 }
 
 run_with_agent(){
-    AGT=$1
-    OPT=$2
+    OPT=$1
     #-XX:+EnableJVMCI -XX:+UseJVMCICompiler -XX:-TieredCompilation -XX:+PrintCompilation -XX:+UnlockExperimentalVMOptions 
-    echo "$JAVA_HOME/bin/java $JIT -agentpath:./$AGT=$OPT Main $LOOP"
-    time $JAVA_HOME/bin/java $JIT -agentpath:./$AGT=$OPT Main $LOOP 
-    #pid=`pgrep java`
-    #echo "PID=$pid"
+    echo "$JAVA_HOME/bin/java $JIT -agentpath:`pwd`/$AGENT=\"$OPT\" Main $LOOP"
+    time $JAVA_HOME/bin/java $JIT -agentpath:`pwd`/$AGENT=$OPT Main $LOOP 
 }
 #java_build
 cpp_build
 if [ $? = 0 ]; then
-    echo "build done"
-    #run_with_agent $AGENT "sample_duration=5;sample_mem=mem.log"
-    #run_and_attach $AGENT "sample_duration=3;frequency=49;sample_cpu=cpu.log"
+    #    attach "sample_duration=3;sample_method=9;log_file=method.log;method_rules=tune.cfg;action_n=3;start_until=.PROF%start"
+    #jcmd_attach "sample_duration=5;frequency=49;flame=cpu.log"
     #./flamegraph.pl cpu.log > flame.svg
 
-    #run_and_attach $AGENT "sample_duration=3;frequency=49;sample_thread=thread.log"
+    #jcmd_attach "sample_duration=5;frequency=49;sample_thread=4;log_file=thread.log"
+    #jcmd_attach "sample_duration=3;sample_method=9;log_file=method.log"
 
-    #run_and_attach $AGENT "sample_duration=3;sample_top=9;sample_method=method.log"
-    #run_and_attach $AGENT "sample_duration=3;sample_top=9;sample_method=method.log;monitor_duration=1;count_top=1"
-    #run_and_attach $AGENT "sample_duration=3;sample_top=9;sample_method=method.log;monitor_duration=1;lat_top=2"
+    #jcmd_attach "sample_duration=3;sample_method=9;log_file=method.log;monitor_duration=1;count_top=1"
+    #jcmd_attach "sample_duration=5;sample_method=9;log_file=method.log;monitor_duration=1;lat_top=2"
 
-    #run_with_agent $AGENT "sample_duration=10;sample_mem=mem.log;mon_field=Main@loop@I"
-    #run_with_agent $AGENT "sample_duration=10;sample_mem=mem.log;mon_size=1"
+    #jcmd_attach "sample_duration=3;sample_method=9;log_file=method.log;rule_cfg=tune.cfg;wait=1"
+    #jcmd_attach "sample_duration=3;sample_method=9;log_file=method.log;method_rules=tune.cfg;action_n=3;start_until=.PROF%start"
+    jcmd_attach "sample_duration=3;sample_method=9;log_file=method.log;config_rules=tune.cfg;monitor_duration=3;lat_top=2"
+    #jcmd_attach "sample_duration=3;sample_method=9;log_file=method.log;monitor_duration=3;lat_top=2"
 
-    #run_with_agent $AGENT "sample_duration=10;sample_mem=mem.log;mon_field=java.util.HashMap@loadFactor@F"
-    #run_with_agent $AGENT "sample_duration=10;sample_mem=mem.log;mon_field=java.util.HashMap@DEFAULT_LOAD_FACTOR@F"
+    #run_with_agent "sample_duration=5;sample_method=9" #;log_file=method.log;wait=8;method_rules=tune.cfg;action_n=2
+    #run_with_agent $AGENT "sample_duration=10;sample_mem=9;log_file=mem.log;count_alloc=1"
+    #run_with_agent $AGENT "sample_duration=10;sample_mem=9;log_file=mem.log;mon_size=1"
 
-    run_with_agent $AGENT "sample_duration=10;sample_mem=mem.log;tune_field=java.util.HashMap@DEFAULT_INITIAL_CAPACITY@I@1@2,499"  #1:*2
-    #run_with_agent $AGENT "sample_duration=10;sample_mem=mem.log;tune_field=java.util.HashMap@DEFAULT_LOAD_FACTOR@F@2@0.2,0.8"  #2:-0.5 (0.2, 0.8)
     #echo "rule : when HashMap.resize  -> + initial_capacity"
     #echo "rule :      HashMap.getNode -> - loadFactor "
 
