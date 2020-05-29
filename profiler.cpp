@@ -501,8 +501,19 @@ void SetupTimer(int duration, int interval, __sighandler_t timer_handler){
     setitimer (ITIMER_VIRTUAL, &timer, NULL);
 }
 void JNICALL SampledObjectAlloc(jvmtiEnv* jvmti, JNIEnv* env, jthread thread,
-                                jobject object, jclass object_klass, jlong size) {
-    //if (jni == NULL) jni = env;
+                                jobject object, jclass klass, jlong size) {
+    //getCallerMethodName(thread);
+    //get_method_name(jmethodID);
+    char* class_sig = NULL;
+    if (jvmti->GetClassSignature(klass, &class_sig, NULL) ==0 ){
+        string method_name = getCallerMethodName(thread);
+        string result = method_name+"("+decode_class_signature(string(class_sig)) + ")";
+        jvmti->RawMonitorEnter(tree_lock);
+        MEM_MAP[result]++;
+        jvmti->RawMonitorExit(tree_lock);
+        //cout<<"      SampleObjectAlloc() map.size="<<MEM_MAP.size()<<endl;
+    }
+    jvmti_free(class_sig);
 }
 
 void JNICALL VMDeath(jvmtiEnv* jvmti, JNIEnv* env) {
@@ -590,6 +601,10 @@ void StartBPF(unsigned long id) {
         cout << "attached fn:"<<fn <<" to pid:" << PID << " perf event "<< endl;
     }
     cout << "BPF sampling " << DURATION << " seconds" << endl;
+}
+void StopAlloc(){
+    sleep(DURATION);
+    if (out_perf!=NULL) fflush(out_perf);
 }
 void StopBPF(){
     sleep(DURATION);
@@ -841,26 +856,26 @@ bool str_contains(string s, string k){
     return s.find(k)==0;
 }
 ///////////////////////////////////////////
-void registerCapa(jvmtiEnv* jvmti){
+void registerCapa(jvmtiEnv* jvmti, int alloc){
     jvmtiCapabilities capa = {0};
     capa.can_tag_objects = 1;
     capa.can_generate_all_class_hook_events = 1;
     capa.can_generate_compiled_method_load_events = 1;
-    //capa.can_generate_sampled_object_alloc_events = 1;
+    if(alloc>0) capa.can_generate_sampled_object_alloc_events = 1;
     //capa.can_generate_garbage_collection_events = 1;
     //capa.can_generate_object_free_events = 1;
     //capa.can_generate_vm_object_alloc_events = 1;
     jvmti->AddCapabilities(&capa);
 }
-void registerCall(jvmtiEnv* jvmti){
+void registerCall(jvmtiEnv* jvmti, int alloc){
     jvmtiEventCallbacks call = {0};
     //call.GarbageCollectionStart = GarbageCollectionStart;
     //call.GarbageCollectionFinish = GarbageCollectionFinish;
     //call.VMInit = VMInit;
-    //call.SampledObjectAlloc = SampledObjectAlloc;
     call.CompiledMethodLoad = CompiledMethodLoad;
     call.CompiledMethodUnload = CompiledMethodUnload;
     call.DynamicCodeGenerated = DynamicCodeGenerated;
+    if(alloc>0) call.SampledObjectAlloc = SampledObjectAlloc;
     jvmti->SetEventCallbacks(&call, sizeof(call));
 }
 void disableAllEvents(){
@@ -870,24 +885,24 @@ void disableAllEvents(){
     jvmti->SetEventNotificationMode(JVMTI_DISABLE, JVMTI_EVENT_COMPILED_METHOD_LOAD, NULL);
     jvmti->SetEventNotificationMode(JVMTI_DISABLE, JVMTI_EVENT_COMPILED_METHOD_UNLOAD, NULL);
     jvmti->SetEventNotificationMode(JVMTI_DISABLE, JVMTI_EVENT_DYNAMIC_CODE_GENERATED, NULL);
-    //jvmti->SetEventNotificationMode(JVMTI_DISABLE, JVMTI_EVENT_SAMPLED_OBJECT_ALLOC, NULL);
+    jvmti->SetEventNotificationMode(JVMTI_DISABLE, JVMTI_EVENT_SAMPLED_OBJECT_ALLOC, NULL);
 }
-void enableEvent(jvmtiEnv* jvmti){
+void enableEvent(jvmtiEnv* jvmti, int alloc){
     //jvmti->SetEventNotificationMode(JVMTI_ENABLE, JVMTI_EVENT_GARBAGE_COLLECTION_START, NULL);
     //jvmti->SetEventNotificationMode(JVMTI_ENABLE, JVMTI_EVENT_GARBAGE_COLLECTION_FINISH, NULL);
     //jvmti->SetEventNotificationMode(JVMTI_ENABLE, JVMTI_EVENT_VM_INIT, NULL);
     jvmti->SetEventNotificationMode(JVMTI_ENABLE, JVMTI_EVENT_COMPILED_METHOD_LOAD, NULL);
     jvmti->SetEventNotificationMode(JVMTI_ENABLE, JVMTI_EVENT_COMPILED_METHOD_UNLOAD, NULL);
     jvmti->SetEventNotificationMode(JVMTI_ENABLE, JVMTI_EVENT_DYNAMIC_CODE_GENERATED, NULL);
-    //jvmti->SetEventNotificationMode(JVMTI_ENABLE, JVMTI_EVENT_SAMPLED_OBJECT_ALLOC, NULL);
+    if(alloc>0) jvmti->SetEventNotificationMode(JVMTI_ENABLE, JVMTI_EVENT_SAMPLED_OBJECT_ALLOC, NULL);
 
     jvmti->GenerateEvents(JVMTI_EVENT_DYNAMIC_CODE_GENERATED);
     jvmti->GenerateEvents(JVMTI_EVENT_COMPILED_METHOD_LOAD);
 }
-void gen_perf_file(){
-    registerCapa(jvmti);
-    registerCall(jvmti);
-    enableEvent(jvmti);
+void gen_perf_file(int alloc){
+    registerCapa(jvmti,alloc);
+    registerCall(jvmti,alloc);
+    enableEvent(jvmti,alloc);
     jvmti->SetHeapSamplingInterval(10*1024*1024); //10m
 }
 void read_cfg(string filename){
@@ -913,8 +928,11 @@ int do_single_options(string k, string v){
         BPF_PERF_FREQ=stoi(v);
     }else if(k.compare("log_file")==0){
         out = fopen(v.c_str(), "w");
+    }else if(k.compare("sample_alloc")==0){ // 0000 0000
+        SAMPLE_ALLOC_N=stoi(v);
+        return 0;
     }else if(k.compare("flame")==0){         // 0000 0001
-        gen_perf_file();
+        gen_perf_file(0);
         out = fopen(v.c_str(), "w");
         return 1;
     }else if(k.compare("sample_thread")==0){ // 0000 0010
@@ -922,7 +940,7 @@ int do_single_options(string k, string v){
         return 2;
     }else if(k.compare("sample_method")==0){ // 0000 0100
         SAMPLE_TOP_N=stoi(v);
-        gen_perf_file();
+        gen_perf_file(0);
         return 4;
     }else if(k.compare("lat_top")==0){
         LAT_TOP_N=stoi(v);
@@ -1116,12 +1134,19 @@ void getJNI(JavaVM* vm){
 }
 void profile(int id){
     wait_until(UNTIL_TEXT);
-    for (int i=0;i<TUNING_N;i++){
+    if(id==0){
+        StopAlloc();
+        //map<string,long> results = PrintAlloc();
+        //print_vector(results);
+        //tune_all_fields(TUNE_RULES, results);
+    }else{
+      for (int i=0;i<TUNING_N;i++){
         StartBPF(id);
         StopBPF();
         map<string,long> results = PrintBPF(id);
         //print_vector(results);
         tune_all_fields(TUNE_RULES, results);
+      }
     }
 }
 JNIEXPORT jint JNICALL Agent_OnLoad(JavaVM* vm, char* options, void* reserved) {
