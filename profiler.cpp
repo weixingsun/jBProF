@@ -37,6 +37,7 @@ static jrawMonitorID tree_lock;
 static bool UNTIL = true;
 static string UNTIL_TEXT;
 static bool BPF_INIT = false;
+static int SAMPLE_ALLOC_N = 20;
 static int SAMPLE_TOP_N = 20;
 static int COUNT_TOP_N = 0;
 static int LAT_TOP_N = 0;
@@ -49,7 +50,7 @@ static int TUNING_N = 1;
 static ebpf::BPF bpf;
 static map<int,string> BPF_TXT_MAP;
 static map<int,string> BPF_FN_MAP;
-static map<string,int> MEM_MAP;
+static map<string,long> MEM_MAP;
 static vector<string> TUNE_RULES;
 
 struct PartialMatch {
@@ -502,8 +503,6 @@ void SetupTimer(int duration, int interval, __sighandler_t timer_handler){
 }
 void JNICALL SampledObjectAlloc(jvmtiEnv* jvmti, JNIEnv* env, jthread thread,
                                 jobject object, jclass klass, jlong size) {
-    //getCallerMethodName(thread);
-    //get_method_name(jmethodID);
     char* class_sig = NULL;
     if (jvmti->GetClassSignature(klass, &class_sig, NULL) ==0 ){
         string method_name = getCallerMethodName(thread);
@@ -603,6 +602,7 @@ void StartBPF(unsigned long id) {
     cout << "BPF sampling " << DURATION << " seconds" << endl;
 }
 void StopAlloc(){
+    cout << "StopAlloc -----------> " << DURATION << " seconds" << endl;
     sleep(DURATION);
     if (out_perf!=NULL) fflush(out_perf);
 }
@@ -826,6 +826,17 @@ map<string,long> PrintFlame(){
     return vs;
 }
 
+map<string,long> PrintAlloc(int N){
+    //map<string,long> msl;
+    int i = 0;
+    for (auto it : MEM_MAP) {
+        if (++i>N) break;
+        fprintf(out, "%ld\t%s\n", it.second, it.first.c_str());
+        //msl.insert({it.first.name, 100*it.second/total_samples});
+    }
+    fclose(out);
+    return MEM_MAP;
+}
 map<string,long> PrintBPF(unsigned long id){
     map<string,long> msl;
     switch((int)log2(id)){
@@ -899,7 +910,7 @@ void enableEvent(jvmtiEnv* jvmti, int alloc){
     jvmti->GenerateEvents(JVMTI_EVENT_DYNAMIC_CODE_GENERATED);
     jvmti->GenerateEvents(JVMTI_EVENT_COMPILED_METHOD_LOAD);
 }
-void gen_perf_file(int alloc){
+void setup_jvmti(int alloc){
     registerCapa(jvmti,alloc);
     registerCall(jvmti,alloc);
     enableEvent(jvmti,alloc);
@@ -929,10 +940,11 @@ int do_single_options(string k, string v){
     }else if(k.compare("log_file")==0){
         out = fopen(v.c_str(), "w");
     }else if(k.compare("sample_alloc")==0){ // 0000 0000
+        setup_jvmti(1);
         SAMPLE_ALLOC_N=stoi(v);
         return 0;
     }else if(k.compare("flame")==0){         // 0000 0001
-        gen_perf_file(0);
+        setup_jvmti(0);
         out = fopen(v.c_str(), "w");
         return 1;
     }else if(k.compare("sample_thread")==0){ // 0000 0010
@@ -940,7 +952,7 @@ int do_single_options(string k, string v){
         return 2;
     }else if(k.compare("sample_method")==0){ // 0000 0100
         SAMPLE_TOP_N=stoi(v);
-        gen_perf_file(0);
+        setup_jvmti(0);
         return 4;
     }else if(k.compare("lat_top")==0){
         LAT_TOP_N=stoi(v);
@@ -1136,7 +1148,7 @@ void profile(int id){
     wait_until(UNTIL_TEXT);
     if(id==0){
         StopAlloc();
-        //map<string,long> results = PrintAlloc();
+        map<string,long> results = PrintAlloc(SAMPLE_ALLOC_N);
         //print_vector(results);
         //tune_all_fields(TUNE_RULES, results);
     }else{
