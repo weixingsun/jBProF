@@ -53,6 +53,11 @@ static map<int,string> BPF_FN_MAP;
 static map<string,long> MEM_MAP;
 static vector<string> TUNE_RULES;
 
+static bool ALLOC_SIZE_CLASS_NAME_HAS_QUOTE=false;
+static long SAMPLE_ALLOC_INTERVAL = 0;
+static string ALLOC_SIZE_CLASS_NAME;
+static map<int,long> ALLOC_SIZE_MAP;
+
 struct PartialMatch {
     string s;
     PartialMatch(const string& str) : s(str) {}
@@ -305,7 +310,10 @@ string get_bpf_text(unsigned long id){
     int index = log2(id);
     return BPF_TXT_MAP[index];
 }
-
+inline bool str_ends_with(string const & value, string const & ending){
+    if (ending.size() > value.size()) return false;
+    return equal(ending.rbegin(), ending.rend(), value.rbegin());
+}
 static jlong get_time(jvmtiEnv* jvmti) {
     jlong current_time;
     jvmti->GetTime(&current_time);
@@ -353,7 +361,15 @@ static string get_method_name(jmethodID method) {
         return "(NONAME)";
     }
 }
-
+string getClassName(jclass klass){
+    string name = "";
+    char* class_sig = NULL;
+    if (jvmti->GetClassSignature(klass, &class_sig, NULL) ==0 ){
+        name = string(class_sig);
+    }
+    jvmti_free(class_sig);
+    return name;
+}
 string getCallerMethodName(jthread thread){
     int DEPTH = 1;
     jvmtiFrameInfo frames[DEPTH];
@@ -503,16 +519,24 @@ void SetupTimer(int duration, int interval, __sighandler_t timer_handler){
 }
 void JNICALL SampledObjectAlloc(jvmtiEnv* jvmti, JNIEnv* env, jthread thread,
                                 jobject object, jclass klass, jlong size) {
-    char* class_sig = NULL;
-    if (jvmti->GetClassSignature(klass, &class_sig, NULL) ==0 ){
-        string method_name = getCallerMethodName(thread);
-        string result = method_name+"("+decode_class_signature(string(class_sig)) + ")";
-        jvmti->RawMonitorEnter(tree_lock);
-        MEM_MAP[result]++;
-        jvmti->RawMonitorExit(tree_lock);
-        //cout<<"      SampleObjectAlloc() map.size="<<MEM_MAP.size()<<endl;
+    string class_name = getClassName(klass);
+    string method_name = getCallerMethodName(thread);
+    if(ALLOC_SIZE_CLASS_NAME.size()>0){
+        string key_size = "";
+        //if(ALLOC_SIZE_CLASS_NAME.find('(') != string::npos){
+        if(ALLOC_SIZE_CLASS_NAME_HAS_QUOTE){
+            key_size = method_name+"("+ decode_class_signature(class_name) + ")";
+        }else{
+            key_size = decode_class_signature(class_name);
+        }
+        if(ALLOC_SIZE_CLASS_NAME == key_size){
+            ALLOC_SIZE_MAP[size]++;
+        }
     }
-    jvmti_free(class_sig);
+    string result = method_name+"("+decode_class_signature(class_name) + ")";
+    jvmti->RawMonitorEnter(tree_lock);  //maybe cpp mutex could improve perf ?
+    MEM_MAP[result]++;
+    jvmti->RawMonitorExit(tree_lock);
 }
 
 void JNICALL VMDeath(jvmtiEnv* jvmti, JNIEnv* env) {
@@ -827,12 +851,16 @@ map<string,long> PrintFlame(){
 }
 
 map<string,long> PrintAlloc(int N){
-    //map<string,long> msl;
     int i = 0;
     for (auto it : MEM_MAP) {
         if (++i>N) break;
         fprintf(out, "%ld\t%s\n", it.second, it.first.c_str());
-        //msl.insert({it.first.name, 100*it.second/total_samples});
+    }
+    if(ALLOC_SIZE_CLASS_NAME.size()>0){
+        fprintf(out, "Class %s size:\nCounts\tSize\n", ALLOC_SIZE_CLASS_NAME.c_str());
+        for (auto it : ALLOC_SIZE_MAP) {
+            fprintf(out, "%ld\t%d\n", it.second, it.first);
+        }
     }
     fclose(out);
     return MEM_MAP;
@@ -914,7 +942,8 @@ void setup_jvmti(int alloc){
     registerCapa(jvmti,alloc);
     registerCall(jvmti,alloc);
     enableEvent(jvmti,alloc);
-    jvmti->SetHeapSamplingInterval(10*1024*1024); //10m
+    if(SAMPLE_ALLOC_INTERVAL>0) jvmti->SetHeapSamplingInterval(SAMPLE_ALLOC_INTERVAL);
+    else jvmti->SetHeapSamplingInterval(10*1024*1024); //default 10m
 }
 void read_cfg(string filename){
     //java.util.HashMap.resize		java.util.HashMap$I^DEFAULT_INITIAL_CAPACITY    *2<2048
@@ -930,6 +959,33 @@ void read_cfg(string filename){
     }
     in.close();
 }
+// 1s  -> 1000ms
+// 1ms -> 1000us
+// 1us -> 1000ns
+long get_num_from_str(string str){
+    if( str_ends_with(str,"ns") ){
+        str.pop_back();str.pop_back();
+        return stol(str);
+    }else if( str_ends_with(str,"us") ){
+        str.pop_back();str.pop_back();
+        return stol(str)*1000;
+    }else if( str_ends_with(str,"ms") ){
+        str.pop_back();str.pop_back();
+        return stol(str)*1000*1000;
+    }else if( str_ends_with(str,"s") ){
+        str.pop_back();
+        return stol(str)*1000*1000*1000;
+    }else if( str_ends_with(str,"k") ){
+        str.pop_back();
+        return stol(str)*1024;
+    }else if( str_ends_with(str,"m") ){
+        str.pop_back();
+        return stol(str)*1024*1024;
+    }else if( str_ends_with(str,"g") ){
+        str.pop_back();
+        return stol(str)*1024*1024*1024;
+    }
+}
 int do_single_options(string k, string v){
     if (k.compare("sample_duration") == 0){
         DURATION=stoi(v);
@@ -939,6 +995,13 @@ int do_single_options(string k, string v){
         BPF_PERF_FREQ=stoi(v);
     }else if(k.compare("log_file")==0){
         out = fopen(v.c_str(), "w");
+    }else if(k.compare("alloc_class_size")==0){
+	ALLOC_SIZE_CLASS_NAME = v;
+        if(v.find('(') != string::npos){
+            ALLOC_SIZE_CLASS_NAME_HAS_QUOTE=true;
+        }
+    }else if(k.compare("sample_alloc_interval")==0){
+        SAMPLE_ALLOC_INTERVAL=get_num_from_str(v);
     }else if(k.compare("sample_alloc")==0){ // 0000 0000
         setup_jvmti(1);
         SAMPLE_ALLOC_N=stoi(v);
@@ -1010,10 +1073,6 @@ void modify_field(vector<string> field){
     //cout<<"----------cls='"<< class_name<<"' f='"<< field_name<<"' t='"<< field_type<<"' a='"<< algo<<"' m='"<< max<<"'"<<endl;
     tune_static(jni, class_name, field_name, field_type, max, algo);
 }
-inline bool str_ends_with(string const & value, string const & ending){
-    if (ending.size() > value.size()) return false;
-    return equal(ending.rbegin(), ending.rend(), value.rbegin());
-}
 void exec_method(string method){
     cout<<"executing method: "<<method<<endl;
     vector<string> cls_vec = str_2_vec(method,'$');
@@ -1048,33 +1107,6 @@ vector<string> parse_cond(string s){
         vs.push_back(s);
     }
     return vs;
-}
-// 1s  -> 1000ms
-// 1ms -> 1000us
-// 1us -> 1000ns
-long get_num_from_str(string str){
-    if( str_ends_with(str,"ns") ){
-        str.pop_back();str.pop_back();
-        return stol(str);
-    }else if( str_ends_with(str,"us") ){
-        str.pop_back();str.pop_back();
-        return stol(str)*1000;
-    }else if( str_ends_with(str,"ms") ){
-        str.pop_back();str.pop_back();
-        return stol(str)*1000*1000;
-    }else if( str_ends_with(str,"s") ){
-        str.pop_back();
-        return stol(str)*1000*1000*1000;
-    }else if( str_ends_with(str,"k") ){
-        str.pop_back();
-        return stol(str)*1024;
-    }else if( str_ends_with(str,"m") ){
-        str.pop_back();
-        return stol(str)*1024*1024;
-    }else if( str_ends_with(str,"g") ){
-        str.pop_back();
-        return stol(str)*1024*1024*1024;
-    }
 }
 void tune_all_fields(vector<string> TUNE_OPTIONS, map<string,long> results){
     if(TUNE_OPTIONS.size()>0){

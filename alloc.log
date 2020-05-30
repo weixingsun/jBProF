@@ -1,0 +1,7 @@
+293	java.lang.Integer.toString(byte)
+305	java.lang.Integer.toString(java.lang.String)
+206	java.lang.Integer.valueOf(java.lang.Integer)
+374	java.util.HashMap.newNode(java.util.HashMap$Node)
+Class java.lang.String size:
+Counts	Size
+305	24
