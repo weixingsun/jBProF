@@ -81,7 +81,7 @@ Features:
         log_file=method.log
         rule: java.util.HashMap.resize		java.util.HashMap$I^DEFAULT_INITIAL_CAPACITY 	x4<1024
         rule: java.util.HashMap.resize		Main$()V^IncreaseMapInitSize()
-        rule: java.util.HashMap.resize>1s	Main$()V^IncreaseMapInitSize()
+        rule: java.util.HashMap.resize>1s	    Main$()V^IncreaseMapInitSize()
         rule: java.util.ArrayList.grow		java.util.ArrayList$I^DEFAULT_CAPACITY       	x2<2048
         rule: java.util.HashMap.getNode		java.util.HashMap$F^DEFAULT_LOAD_FACTOR      	-0.05>0.2
         action_n=3
