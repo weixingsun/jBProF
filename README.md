@@ -32,8 +32,8 @@ Features:
 
     "sample_duration=3;sample_method=9;log_file=method.log"
     "sample_duration=3;sample_method=9;log_file=method.log;monitor_duration=1;count_top=3"
-    "sample_duration=3;sample_method=9;log_file=method.log;monitor_duration=1;lat_top=1"
-    "sample_duration=3;sample_method=9;log_file=method.log;monitor_duration=1;lat_name=sleep"
+    "sample_duration=3;sample_method=9;log_file=method.log;monitor_duration=2;lat_top=1"
+    "sample_duration=3;sample_method=9;log_file=method.log;monitor_duration=3;lat_name=sleep"
     
     Top methods for 3 seconds:
     samples	 method_addr	 method_name
