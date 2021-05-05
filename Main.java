@@ -26,7 +26,8 @@ public class Main {
 		for (int i=0;i<m;i++){
 			count(i,map);
 			total +=i;
-			//if(i%100==0) wait(10);
+			//if(i%100==0) wait(1);
+			wait(1);
 		}
 		return total;
 	}

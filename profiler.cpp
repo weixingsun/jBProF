@@ -22,6 +22,11 @@
 #include <jvmti.h>
 #include <linux/perf_event.h>
 #include <linux/hw_breakpoint.h>
+#include <dlfcn.h>
+#include <iomanip>
+//#include <linux/kallsyms.h>
+//const char *kallsyms_lookup(unsigned long addr, unsigned long *symbolsize, unsigned long *ofset, char **modname, char *namebuf)
+//void print_symbol(const char *fmt, unsigned long addr)
 
 using namespace std;
 
@@ -36,6 +41,7 @@ static jrawMonitorID tree_lock;
 
 static bool UNTIL = true;
 static string UNTIL_TEXT;
+static string LAT_NAME;
 static bool BPF_INIT = false;
 static int SAMPLE_ALLOC_N = 20;
 static int SAMPLE_TOP_N = 20;
@@ -57,6 +63,7 @@ static bool ALLOC_SIZE_CLASS_NAME_HAS_QUOTE=false;
 static long SAMPLE_ALLOC_INTERVAL = 0;
 static string ALLOC_SIZE_CLASS_NAME;
 static map<int,long> ALLOC_SIZE_MAP;
+static map<unsigned long,string> SYM_MAP;
 
 struct PartialMatch {
     string s;
@@ -175,14 +182,18 @@ int do_perf_event_flame(struct bpf_perf_event_data *ctx) {
         // arm64, s390, powerpc, x86_32
         page_offset = PAGE_OFFSET;
 #endif
-        if (ip > page_offset) {
-            key.kernel_ip = ip;
-        }
+        //if (ip > page_offset) {
+        //    key.kernel_ip = ip;
+        //}
     }
     counts.increment(key);
     return 0;
 }
 )";
+
+//#define PT_REGS_IP(ctx)		((ctx)->ip)
+//#define PT_REGS_FP(ctx)       ((ctx)->bp)
+//#define PT_REGS_SP(ctx)		((ctx)->sp)
 string BPF_TXT_MTD = R"(
 #include <linux/sched.h>
 #include <uapi/linux/ptrace.h>
@@ -248,7 +259,7 @@ int func_return0(struct bpf_perf_event_data *ctx) {
     u64 key = bpf_log2l(delta);
     dist.increment(key);
     return 0;
-} 
+}
 int do_perf_event_method(struct bpf_perf_event_data *ctx) {
     u64 id = bpf_get_current_pid_tgid();
     u32 tgid = id >> 32;
@@ -258,39 +269,43 @@ int do_perf_event_method(struct bpf_perf_event_data *ctx) {
     //struct task_struct *p = (struct task_struct*) bpf_get_current_task();
     //void* ptr = p->stack + THREAD_SIZE - TOP_OF_KERNEL_STACK_PADDING;
     //struct pt_regs* regs = ((struct pt_regs *)ptr) - 1;
+    //u64 p_ret = regs->bp+8;   //caller.next_ip  //32bit
+    //u64 p_bp = regs->bp+4;    //caller.bp       //32bit
+    //u64 p_ret = regs->bp+16;  //caller.next_ip  //64bit
+
     struct pt_regs* regs = &ctx->regs;
     struct method_key_t key = {.pid = tgid};
-    //key.ret = regs->r14;
-    u64 p_ret = regs->bp+8;
+    u64 p_ret = regs->bp+8;  //caller.next_ip  //32bit
     bpf_probe_read(&key.ret, sizeof(u64), (void *)p_ret);
-    u32 offset = 0;  // 32bits
-    bpf_probe_read(&offset, sizeof(offset), (void *)(key.ret-4) );
-    key.bp = key.ret + (int)offset;
-
-    key.user_stack_id = stack_traces.get_stackid(&ctx->regs, BPF_F_USER_STACK);
-    key.kernel_stack_id = stack_traces.get_stackid(&ctx->regs, 0);
-    if (key.kernel_stack_id >= 0) {
-        // populate extras to fix the kernel stack
-        u64 ip = PT_REGS_IP(&ctx->regs);
-        u64 page_offset;
-        // if ip isn't sane, leave key ips as zero for later checking
-        #if defined(CONFIG_X86_64) && defined(__PAGE_OFFSET_BASE)  // x64 (4.11 ... 4.16)
-            page_offset = __PAGE_OFFSET_BASE;
-        #elif defined(CONFIG_X86_64) && defined(__PAGE_OFFSET_BASE_L4)  // x64 ( > 4.17 )
-            #if defined(CONFIG_DYNAMIC_MEMORY_LAYOUT) && defined(CONFIG_X86_5LEVEL)
-                page_offset = __PAGE_OFFSET_BASE_L5;
-            #else
-                page_offset = __PAGE_OFFSET_BASE_L4;
+    if (key.ret>0){
+        u32 offset = 0;  // 32bits
+        bpf_probe_read(&offset, sizeof(offset), (void *)(key.ret-4) );
+        key.bp = key.ret + (int)offset;
+        key.user_stack_id = stack_traces.get_stackid(&ctx->regs, BPF_F_USER_STACK);
+        key.kernel_stack_id = stack_traces.get_stackid(&ctx->regs, 0);
+        if (key.kernel_stack_id >= 0) {
+            // populate extras to fix the kernel stack
+            u64 ip = PT_REGS_IP(&ctx->regs);
+            u64 page_offset;
+            // if ip isn't sane, leave key ips as zero for later checking
+            #if defined(CONFIG_X86_64) && defined(__PAGE_OFFSET_BASE)  // x64 (4.11 ... 4.16)
+                page_offset = __PAGE_OFFSET_BASE;
+            #elif defined(CONFIG_X86_64) && defined(__PAGE_OFFSET_BASE_L4)  // x64 ( > 4.17 )
+                #if defined(CONFIG_DYNAMIC_MEMORY_LAYOUT) && defined(CONFIG_X86_5LEVEL)
+                    page_offset = __PAGE_OFFSET_BASE_L5;
+                #else
+                    page_offset = __PAGE_OFFSET_BASE_L4;
+                #endif
+            #else   // x64 (4.6 + arm64, s390, powerpc, x86_32 )
+                page_offset = PAGE_OFFSET;
             #endif
-        #else   // x64 (4.6 + arm64, s390, powerpc, x86_32 )
-            page_offset = PAGE_OFFSET;
-        #endif
-        if (ip > page_offset) {
-            key.kernel_ip = ip;
+            if (ip > page_offset) {
+                key.kernel_ip = ip;
+            }
         }
+        counts.increment(key);
+    }else{   // when if ret==0
     }
-    
-    counts.increment(key);
     return 0;
 }
 )";
@@ -557,7 +572,10 @@ void JNICALL CompiledMethodLoad(jvmtiEnv *jvmti, jmethodID method, jint code_siz
     if (out_perf!=NULL && !writing_perf){
 	string method_name = get_method_name(method);
 	//fprintf(stdout, "method_name:  %s \n", method_name );
-	fprintf(out_perf, "%lx %x %s\n", (unsigned long) code_addr, code_size, method_name.c_str());
+    unsigned long key = (unsigned long) code_addr;
+	fprintf(out_perf, "%lx %x %s\n", key, code_size, method_name.c_str());
+    SYM_MAP[key] = method_name;
+    //cout<<"CompiledMethodLoad: "<<(--SYM_MAP.end())->second<<endl;
     }
 }
 void JNICALL CompiledMethodUnload(jvmtiEnv *jvmti_env, jmethodID method, const void* code_addr){
@@ -565,7 +583,10 @@ void JNICALL CompiledMethodUnload(jvmtiEnv *jvmti_env, jmethodID method, const v
 }
 void JNICALL DynamicCodeGenerated(jvmtiEnv *jvmti, const char* method_name, const void* code_addr, jint code_size) {
     if (out_perf!=NULL && !writing_perf){
-        fprintf(out_perf, "%lx %x %s\n", (unsigned long) code_addr, code_size, method_name);
+        unsigned long key = (unsigned long) code_addr;
+        fprintf(out_perf, "%lx %x %s\n", key, code_size, method_name);
+        SYM_MAP[key] = std::string(method_name);
+        //cout<<"DynamicCodeGenerated: "<<SYM_MAP.size()<<endl;
     }
 }
 /////////////////////////////////////////////////////////////////////////
@@ -719,13 +740,14 @@ void CountMethods(method_type methods[], int n){
 }
 long LatencyMethod(method_type method){
     perf_event_attr peas[2];
-    peas[0]  =AttachBreakPoint(method.addr, "func_entry", 0);
+    peas[0]=AttachBreakPoint(method.addr, "func_entry", 0);
     peas[1]=AttachBreakPoint(method.ret, "func_return", 0);
     cout<<"latency measuring for "<<MON_DURATION<<" second"<<endl;
     sleep(MON_DURATION);
     DetachBreakPoint(&peas[0]);
     DetachBreakPoint(&peas[1]);
-    auto dist = bpf.get_hash_table<uint64_t, uint64_t>("dist").get_table_offline();
+    auto t = bpf.get_hash_table<uint64_t, uint64_t>("dist");
+    auto dist = t.get_table_offline();
     cout<<"method latency measured in "<<dist.size() << " scales"<<endl;
     sort( dist.begin(), dist.end(),
       [](pair<uint64_t, uint64_t> a, pair<uint64_t, uint64_t> b) {
@@ -739,7 +761,9 @@ long LatencyMethod(method_type method){
         lat = exp2(it->first);
         fprintf(out, ">%ld     \t %ld\t \n", lat, it->second );
     }
-    dist.clear();
+    fflush(out);
+    t.clear_table_non_atomic();
+    //dist.clear();
     return lat;
 }
 
@@ -758,13 +782,20 @@ map<string,long> PrintTopMethods(int N){
     for (auto it : table) {
         //uint64_t method_addr;
         string   method_name;
-        if (it.first.kernel_stack_id >= 0) {
-            //method_addr = *stacks.get_stack_addr(it.first.kernel_stack_id).begin();
-            method_name = *stacks.get_stack_symbol(it.first.kernel_stack_id, -1).begin()+"[k]";
-        }else if(it.first.user_stack_id >= 0) {
-            //method_addr = *stacks.get_stack_addr(it.first.user_stack_id).begin();
-            method_name = *stacks.get_stack_symbol(it.first.user_stack_id, it.first.pid).begin();
+        if ( SYM_MAP.find(it.first.bp) == SYM_MAP.end() ) {
+            if (it.first.kernel_stack_id >= 0) {
+                //method_addr = *stacks.get_stack_addr(it.first.kernel_stack_id).begin();
+                method_name = *stacks.get_stack_symbol(it.first.kernel_stack_id, -1).begin()+"[k]";
+            }
+            if(it.first.user_stack_id >= 0) {
+                //method_addr = *stacks.get_stack_addr(it.first.user_stack_id).begin();
+                method_name = *stacks.get_stack_symbol(it.first.user_stack_id, it.first.pid).begin();
+            }
+        }else{
+            method_name = SYM_MAP[it.first.bp]+"[MAP]";
         }
+	    //cout<<"method="<<method_name<<"    kid="<<it.first.kernel_stack_id<<"    uid="<<it.first.user_stack_id<<"    bp="<<std::hex<<it.first.bp<<"    ret="<<std::hex<<it.first.ret<<endl;    //////////
+
         //struct method_type method = {.addr=method_addr, .ret=it.first.ret, .name=method_name};
         struct method_type method = {.addr=it.first.bp, .ret=it.first.ret, .name=method_name};
         auto p = mout.find(method);   // use method_name to remove duplicated rows
@@ -796,13 +827,22 @@ map<string,long> PrintTopMethods(int N){
     }
     if(LAT_TOP_N>0){
         cout<<"start latency measuring..."<<endl;
-	msl.clear();
+	    msl.clear();
         for (int i=0; i<LAT_TOP_N; i++){
             long maxLat = LatencyMethod(methods[i]);
-	    //msl.erase( methods[i].name);
-	    //cout<<"method "<<methods[i].name<<" removed --------------"<<endl;
-	    msl.insert({methods[i].name, maxLat});
-	    //cout<<"method "<<methods[i].name<<" = "<<maxLat<<" added --------------"<<endl;
+            //msl.erase( methods[i].name);
+            //cout<<"method "<<methods[i].name<<" removed --------------"<<endl;
+            msl.insert({methods[i].name, maxLat});
+            //cout<<"method "<<methods[i].name<<" = "<<maxLat<<" added --------------"<<endl;
+        }
+    }
+    if(LAT_NAME.size()>0){
+        cout<<"LAT_NAME="<<LAT_NAME<<endl;
+        for (int i=0; i<N; i++){
+            if (methods[i].name.find(LAT_NAME) != std::string::npos) {
+                cout<<"Monitor method: "<<methods[i].name<<endl;
+                long maxLat = LatencyMethod(methods[i]);
+            }
         }
     }
     fflush(out);
@@ -985,6 +1025,7 @@ long get_num_from_str(string str){
         str.pop_back();
         return stol(str)*1024*1024*1024;
     }
+    return 0;
 }
 int do_single_options(string k, string v){
     if (k.compare("sample_duration") == 0){
@@ -1002,21 +1043,23 @@ int do_single_options(string k, string v){
         }
     }else if(k.compare("sample_alloc_interval")==0){
         SAMPLE_ALLOC_INTERVAL=get_num_from_str(v);
-    }else if(k.compare("sample_alloc")==0){ // 0000 0000
+    }else if(k.compare("sample_alloc")==0){
         setup_jvmti(1);
         SAMPLE_ALLOC_N=stoi(v);
         return 0;
-    }else if(k.compare("flame")==0){         // 0000 0001
+    }else if(k.compare("flame")==0){
         setup_jvmti(0);
         out = fopen(v.c_str(), "w");
         return 1;
-    }else if(k.compare("sample_thread")==0){ // 0000 0010
+    }else if(k.compare("sample_thread")==0){
         SAMPLE_TOP_N=stoi(v);
         return 2;
-    }else if(k.compare("sample_method")==0){ // 0000 0100
+    }else if(k.compare("sample_top")==0){
         SAMPLE_TOP_N=stoi(v);
         setup_jvmti(0);
         return 4;
+    }else if(k.compare("lat_name")==0){
+        LAT_NAME=v;
     }else if(k.compare("lat_top")==0){
         LAT_TOP_N=stoi(v);
     }else if(k.compare("count_top")==0){
@@ -1029,7 +1072,7 @@ int do_single_options(string k, string v){
         WAIT=stoi(v);
     }else if(k.compare("start_until")==0){
         UNTIL=false;
-	UNTIL_TEXT=v;
+	    UNTIL_TEXT=v;
     }
     return -1;
 }

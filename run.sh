@@ -4,15 +4,17 @@ AGENT=lib$AGT.so
 BIN=jbprof
 sudo rm -rf $AGENT $BIN log thread.log cpu.log mem.log hs_err* jcmd.log /tmp/perf* /tmp/.java_pid* .attach_pid*  #flame.svg
 sudo kill -9 `pgrep java`
-LOOP="2000 4000000"
+LOOP="2000 5000000"
 JIT="-Xmx400m -Xms10m -XX:+UseParallelGC -XX:ParallelGCThreads=1 -XX:+PreserveFramePointer" # -XX:+DTraceMethodProbes" #-XX:+ExtendedDTraceProbes
 
-JAVA_HOME=/home/sun/jbb/jdk
+JAVA_HOME=/home/weixingsun/jdk16
 java_build(){
     $JAVA_HOME/bin/javac Main.java
 }
 cpp_build(){
-  BCC=/home/sun/jbb/bcc
+  BCC=/home/weixingsun/bcc
+  LNX_VER="`uname -r`"
+  #LNX_INC="-I/usr/src/kernels/$LNX_VER/include" # -I/usr/src/kernels/$LNX_VER/arch/x86/include -I/usr/src/kernels/$LNX_VER/arch/x86/include/generated"
   BCC_INC="-I$BCC/src/cc -I$BCC/src/cc/api -I$BCC/src/cc/libbpf/include/uapi"
   CC=clang
   CPP=g++
@@ -23,7 +25,7 @@ cpp_build(){
   #export LIBRARY_PATH=$LIBRARY_PATH:/usr/local/lib/
   LIB="-lbcc -lpthread"
   #LIB="-shared -lbcc -lstdc++ "
-  OPTS="-O3 -fPIC -shared $JAVA_INC $BCC_INC $LIB"
+  OPTS="-O3 -fPIC -shared $JAVA_INC $BCC_INC $LNX_INC $LIB"
   echo "$CPP $SRC $OPTS -o $AGENT"
         $CPP $SRC $OPTS -o $AGENT
   echo "agent done."
@@ -46,9 +48,11 @@ attach(){
 }
 jcmd_attach(){
     OPT=$1
+    echo "$JAVA_HOME/bin/java $JIT Main $LOOP"
     time $JAVA_HOME/bin/java $JIT Main $LOOP &
     sleep 1
     pid=`pgrep java`
+    #cat /proc/$pid/maps
     #/usr/share/bcc/tools/tplist -p $pid
     echo "$JAVA_HOME/bin/jcmd $pid JVMTI.agent_load ./$AGENT $OPT"
     sudo  $JAVA_HOME/bin/jcmd $pid JVMTI.agent_load ./$AGENT "\"$OPT\""
@@ -61,11 +65,11 @@ run_with_agent(){
     echo "$JAVA_HOME/bin/java $JIT -agentpath:`pwd`/$AGENT=\"$OPT\" Main $LOOP"
     time $JAVA_HOME/bin/java $JIT -agentpath:`pwd`/$AGENT=$OPT Main $LOOP 
 }
-#java_build
+java_build
 cpp_build
 if [ $? = 0 ]; then
-    #    attach "sample_duration=3;sample_method=9;log_file=method.log;method_rules=tune.cfg;action_n=3;start_until=.PROF%start"
-    #jcmd_attach "sample_duration=5;frequency=49;flame=cpu.log"
+    #     attach "sample_duration=5;sample_method=9;log_file=method.log;method_rules=tune.cfg;action_n=3;start_until=.PROF%start"
+    #jcmd_attach "sample_duration=5;frequency=99;flame=cpu.log"
     #./flamegraph.pl cpu.log > flame.svg
 
     #jcmd_attach "sample_duration=5;sample_alloc_interval=10m;sample_alloc=4;alloc_class_size=java.lang.String;log_file=alloc.log"
@@ -73,13 +77,15 @@ if [ $? = 0 ]; then
     #jcmd_attach "sample_duration=5;frequency=49;sample_thread=4;log_file=thread.log"
     #jcmd_attach "sample_duration=3;sample_method=9;log_file=method.log"
 
-    #jcmd_attach "sample_duration=3;sample_method=9;log_file=method.log;monitor_duration=1;count_top=1"
+    #jcmd_attach "sample_duration=3;sample_top=9;log_file=method.log;monitor_duration=3;count_top=2"
     #jcmd_attach "sample_duration=5;sample_method=9;log_file=method.log;monitor_duration=1;lat_top=2"
 
     #jcmd_attach "sample_duration=3;sample_method=9;log_file=method.log;rule_cfg=tune.cfg;wait=1"
     #jcmd_attach "sample_duration=3;sample_method=9;log_file=method.log;method_rules=tune.cfg;action_n=3;start_until=.PROF%start"
     #jcmd_attach "sample_duration=3;sample_method=9;log_file=method.log;config_rules=tune.cfg;monitor_duration=3;lat_top=2"
-    jcmd_attach "sample_duration=3;sample_method=9;log_file=method.log;monitor_duration=3;lat_top=2"
+    #jcmd_attach "sample_duration=3;sample_top=9;log_file=method.log;monitor_duration=3;lat_top=3"
+    jcmd_attach "sample_duration=3;sample_top=20;log_file=method.log;monitor_duration=3;lat_name=sleep"
+    #jcmd_attach "sample_duration=3;sample_top=20;log_file=method.log;monitor_duration=3;lat_name=java.lang.Thread.sleep"
     ###############################################################################################################################
 
     #run_with_agent "sample_duration=5;sample_method=9" #;log_file=method.log;wait=8;method_rules=tune.cfg;action_n=2
@@ -99,4 +105,5 @@ if [ $? = 0 ]; then
     #3f000000 -> 0.5
     #3e800000 -> 0.25
     #/usr/share/bcc/tools/funclatency -d 3 c:malloc
+    killall java
 fi
