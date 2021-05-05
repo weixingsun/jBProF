@@ -33,30 +33,30 @@ Features:
     "sample_duration=3;sample_method=9;log_file=method.log"
     "sample_duration=3;sample_method=9;log_file=method.log;monitor_duration=1;count_top=3"
     "sample_duration=3;sample_method=9;log_file=method.log;monitor_duration=1;lat_top=1"
+    "sample_duration=3;sample_method=9;log_file=method.log;monitor_duration=1;lat_name=sleep"
     
     Top methods for 3 seconds:
     samples	 method_addr	 method_name
-    176	 7f4a37600458	 ParMarkBitMap::mark_obj(HeapWordImpl**, unsigned long)
-    158	 7f4a376561f1	 ParCompactionManager::follow_marking_stacks()
-    151	 7f4a376003f8	 ParMarkBitMap::mark_obj(HeapWordImpl**, unsigned long)
-    141	 7f4a3765f9e5	 ParallelCompactData::add_obj(HeapWordImpl**, unsigned long)
-    46	 7f4a37600445	 ParMarkBitMap::mark_obj(HeapWordImpl**, unsigned long)
-    39	 7f4a376563e8	 ParCompactionManager::follow_marking_stacks()
-    23	 7f4a3766414b	 ParallelCompactData::calc_new_pointer(HeapWordImpl**, ParCompactionManager*)
-    18	 7f4a37600415	 ParMarkBitMap::mark_obj(HeapWordImpl**, unsigned long)
-    16	 7f4a3765620a	 ParCompactionManager::follow_marking_stacks()
+     354	 7f9264d26310 -> 7f9264ec3514	 __pthread_mutex_unlock_usercnt
+     231	 7f925c023c50 -> 7f925c023c50	 __pthread_mutex_unlock_usercnt
+     168	 7f921fa3d2ec -> 7f92457ed3ab	 Interpreter
+     110	 7f92640066d2 -> 7f9263ffe740	 __pthread_cond_timedwait
+      69	 7f9264ec3440 -> 7f9264a0dea7	 JavaThread::sleep(long)
+      66	 7f9236450219 -> 7f926545d4a5	 [UNKNOWN]
+      42	 7f9264a0dcc0 -> 7f924d387764	 JVM_Sleep
+      38	 7f92640066c2 -> 7f9263ffe730	 __pthread_cond_timedwait
+      29	 7f9264ec1430 -> 7f9264ec349d	 java_lang_Thread::interrupted(oopDesc*)
+      28	 7f924d3876c8 -> 7f924d38cdc8	 java.lang.Thread.sleep
 
-    (9) latency for method: (7f4a37600458 -> 7f4a3765722a)	"ParMarkBitMap::mark_obj(HeapWordImpl**, unsigned long)"
-    nsecs           count
-    >4096           79888	 
-    >8192           806	 
-    >16384          151	 
-    >32768          36	 
-    >65536          49	 
-    >131072         33	 
-    >262144         12	 
-    >524288         1	 
-    >1048576        2	 
+    (2) latency for method: (7f9264ec3440 -> 7f9264a0dea7)	"JavaThread::sleep(long)"
+    nsecs    	     count
+    >1048576     	 21	 
+    >2097152     	 2756	 
+
+    (2) latency for method: (7f924d3876c8 -> 7f924d38cdc8)	"java.lang.Thread.sleep"
+    nsecs    	     count
+    >1048576     	 11	 
+    >2097152     	 2752
 
 4.Memory sampling: [alloc.log](https://github.com/weixingsun/jBProF/blob/master/alloc.log)
 
