@@ -4,7 +4,7 @@
     Consistent with perf top/record
     Automatically resolve symbols
     Hardware breakpoint sampling, counting, timing, and perform rule-based actions dynamically 
-
+    This project has been inactively maintained for a while
 Features: 
 
     Agent:   java -agentpath:./libprof.so=$OPTS
